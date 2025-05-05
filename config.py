@@ -76,6 +76,8 @@ votemode = {}
 autoclean = []
 confirmer = {}
 
+API_URL = getenv("API_URL")
+API_KEY = getenv("API_KEY")
 
 START_IMG_URL = getenv(
     "START_IMG_URL", "https://te.legra.ph/file/25efe6aa029c6baea73ea.jpg"
