@@ -407,7 +407,7 @@ class YouTubeAPI:
             fpath = f"downloads/{title}.mp4"
             return fpath
         elif songaudio:
-            if dl := YouTubeUtils.download_with_api(link):
+            if dl := await YouTubeUtils.download_with_api(link):
                 return str(dl)
 
             await loop.run_in_executor(None, song_audio_dl)
@@ -436,7 +436,7 @@ class YouTubeAPI:
                     return
         else:
             direct = True
-            if dl := YouTubeUtils.download_with_api(link):
+            if dl := await YouTubeUtils.download_with_api(link):
                 return str(dl), direct
             downloaded_file = await loop.run_in_executor(None, audio_dl)
         return downloaded_file, direct
