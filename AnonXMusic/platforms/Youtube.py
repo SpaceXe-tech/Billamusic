@@ -16,8 +16,6 @@ from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
 from config import API_URL, API_KEY
 
-DOWNLOADS_DIR = "downloads"
-
 class YouTubeUtils:
     """Utility class for YouTube-related operations."""
     # Compile regex patterns once at class level
@@ -81,20 +79,14 @@ class YouTubeUtils:
         """
         Download audio using the API.
         """
-        if API_URL is None or API_KEY is None or video_id is None:
+        if API_URL is None or API_KEY is None:
             return None
-
-        if video_id.startswith("https://") or video_id.startswith("http://"):
-            url = await YouTubeUtils.normalize_youtube_url(YouTubeUtils.clean_query(video_id))
-            video_id = YouTubeUtils._extract_video_id(url=url)
 
         if video_id is None:
-            LOGGER(__name__).warning("Failed to extract video ID from URL: %s", video_id)
+            LOGGER(__name__).warning("Video ID is None")
             return None
 
-        download_path = Path(DOWNLOADS_DIR) / f"{video_id}.webm"
-        client = HttpxClient()
-        dl = await client.download_file(f"{API_URL}/yt?id={video_id}", download_path)
+        dl = await HttpxClient().download_file(f"{API_URL}/yt?id={video_id}")
         return dl.file_path if dl.success else None
 
 async def shell_cmd(cmd):

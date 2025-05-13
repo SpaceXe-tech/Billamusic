@@ -46,7 +46,7 @@ SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/DevilsHeavenMF")
 AUTO_LEAVING_ASSISTANT = bool(getenv("AUTO_LEAVING_ASSISTANT", False))
 
 
-# Get this credentials from https://developer.spotify.com/dashboard
+# Get these credentials from https://developer.spotify.com/dashboard
 SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID", None)
 SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET", None)
 
@@ -78,6 +78,7 @@ confirmer = {}
 
 API_URL = getenv("API_URL")
 API_KEY = getenv("API_KEY")
+DOWNLOADS_DIR = "downloads"
 
 START_IMG_URL = getenv(
     "START_IMG_URL", "https://te.legra.ph/file/25efe6aa029c6baea73ea.jpg"
