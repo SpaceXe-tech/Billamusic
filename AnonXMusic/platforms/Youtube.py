@@ -17,41 +17,6 @@ from AnonXMusic.utils.formatters import time_to_seconds
 from config import API_URL, API_KEY
 
 class YouTubeUtils:
-    """Utility class for YouTube-related operations."""
-    # Compile regex patterns once at class level
-    YOUTUBE_VIDEO_PATTERN = re.compile(
-        r"^(?:https?://)?(?:www\.)?(?:youtube\.com|music\.youtube\.com|youtu\.be)/"
-        r"(?:watch\?v=|embed/|v/|shorts/)?([\w-]{11})(?:\?|&|$)",
-        re.IGNORECASE,
-    )
-
-    @staticmethod
-    def clean_query(query: str) -> str:
-        """Clean the query by removing unnecessary parameters."""
-        return query.split("&")[0].split("#")[0].strip()
-
-    @staticmethod
-    def _extract_video_id(url: str) -> Optional[str]:
-        """Extract video ID from various YouTube URL formats."""
-        if match := YouTubeUtils.YOUTUBE_VIDEO_PATTERN.match(url):
-            return match.group(1)
-        return None
-
-    @staticmethod
-    async def normalize_youtube_url(url: str) -> str:
-        """Normalize different YouTube URL formats to standard watch URL."""
-        # Handle youtu.be short links
-        if "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].partition("?")[0].partition("#")[0]
-            return f"https://www.youtube.com/watch?v={video_id}"
-
-        # Handle YouTube shorts
-        if "youtube.com/shorts/" in url:
-            video_id = url.split("youtube.com/shorts/")[1].split("?")[0]
-            return f"https://www.youtube.com/watch?v={video_id}"
-
-        return url
-
     @staticmethod
     def get_cookie_file() -> Optional[str]:
         """Get a random cookie file from the 'cookies' directory."""
