@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Union, Optional
 
 import yt_dlp
+from pyrogram import errors
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
@@ -51,8 +52,26 @@ class YouTubeUtils:
             LOGGER(__name__).warning("Video ID is None")
             return None
 
-        dl = await HttpxClient().download_file(f"{API_URL}/yt?id={video_id}")
-        return dl.file_path if dl.success else None
+        from AnonXMusic import app
+        if public_url := await HttpxClient().make_request(f"{API_URL}/yt?id={video_id}"):
+            dl_url = public_url.get("results")
+            if not dl_url:
+                LOGGER(__name__).error(f"Response from API is empty")
+                return None
+            try:
+                msg = await app.get_messages(message_ids=dl_url)
+                if not msg:
+                    LOGGER(__name__).error("Message not found in pyrogram channel")
+                    return None
+                path = await msg.download()
+                return path
+            except errors.FloodWait as e:
+                await asyncio.sleep(e.value+1)
+                return await YouTubeUtils.download_with_api(video_id)
+            except Exception as e:
+                LOGGER(__name__).error(f"Error getting message from pyrogram channel: {e}")
+                return None
+        return None
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
