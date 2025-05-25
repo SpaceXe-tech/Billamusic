@@ -14,8 +14,9 @@ from urllib.parse import unquote
 import aiofiles
 import httpx
 
-import config
+from config import DOWNLOADS_DIR, API_KEY, API_URL
 from AnonXMusic.logging import LOGGER
+
 
 @dataclass
 class DownloadResult:
@@ -26,7 +27,7 @@ class DownloadResult:
 
 class HttpxClient:
     DEFAULT_TIMEOUT = 120
-    DEFAULT_DOWNLOAD_TIMEOUT = 180
+    DEFAULT_DOWNLOAD_TIMEOUT = 120
     CHUNK_SIZE = 8192
     MAX_RETRIES = 2
     BACKOFF_FACTOR = 1.0
@@ -60,9 +61,10 @@ class HttpxClient:
     @staticmethod
     def _get_headers(url: str, base_headers: dict[str, str]) -> dict[str, str]:
         headers = base_headers.copy()
-        if config.API_URL and url.startswith(config.API_URL):
-            headers["X-API-Key"] = config.API_KEY
+        if API_URL and url.startswith(API_URL):
+            headers["X-API-Key"] = API_KEY
         return headers
+
 
     async def download_file(
         self,
@@ -75,29 +77,16 @@ class HttpxClient:
             return DownloadResult(success=False, error="Empty URL provided")
 
         headers = self._get_headers(url, kwargs.pop("headers", {}))
-
         try:
-            # Dynamic timeout override for known slow hosts
-            if "sslip.io" in url:
-                timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=60.0)
-            else:
-                timeout = httpx.Timeout(connect=30.0, read=self._download_timeout)
-
-            start = time.monotonic()
-
             async with self._session.stream(
-                "GET", url, timeout=timeout, headers=headers
+                "GET", url, timeout=self._download_timeout, headers=headers
             ) as response:
                 response.raise_for_status()
-
-                # Determine filename
                 if file_path is None:
                     cd = response.headers.get("Content-Disposition", "")
                     match = re.search(r'filename="?([^"]+)"?', cd)
-                    filename = (
-                        unquote(match[1]) if match else (Path(url).name or uuid.uuid4().hex)
-                    )
-                    path = Path(config.DOWNLOADS_DIR) / filename
+                    filename = unquote(match[1]) if match else (Path(url).name or uuid.uuid4().hex)
+                    path = Path(DOWNLOADS_DIR) / filename
                 else:
                     path = Path(file_path) if isinstance(file_path, str) else file_path
 
@@ -109,10 +98,8 @@ class HttpxClient:
                     async for chunk in response.aiter_bytes(self.CHUNK_SIZE):
                         await f.write(chunk)
 
-            duration = time.monotonic() - start
-            LOGGER(__name__).debug("Downloaded file to %s in %.2fs", path, duration)
-            return DownloadResult(success=True, file_path=path)
-
+                LOGGER(__name__).debug("Successfully downloaded file to %s", path)
+                return DownloadResult(success=True, file_path=path)
         except Exception as e:
             error_msg = self._handle_http_error(e, url)
             LOGGER(__name__).error(error_msg)
@@ -130,7 +117,6 @@ class HttpxClient:
             return None
 
         headers = self._get_headers(url, kwargs.pop("headers", {}))
-
         for attempt in range(max_retries):
             try:
                 start = time.monotonic()
@@ -140,17 +126,24 @@ class HttpxClient:
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
                 return response.json()
 
-            except httpx.TooManyRedirects as e:
-                error_msg = f"Redirect loop for {url}: {repr(e)}"
+            except httpx.HTTPStatusError as e:
+                try:
+                    error_response = e.response.json()
+                    if isinstance(error_response, dict) and "error" in error_response:
+                        error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
+                    else:
+                        error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                except ValueError:
+                    error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+
                 LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
 
-            except httpx.HTTPStatusError as e:
-                body = e.response.text if e.response else "No response"
-                error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {body}"
-                LOGGER(__name__).warning(error_msg)
+            except httpx.TooManyRedirects as e:
+                error_msg = f"Redirect loop for {url}: {repr(e)}"
+                LOGGER.warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
@@ -163,11 +156,13 @@ class HttpxClient:
                     return None
 
             except ValueError as e:
-                LOGGER(__name__).error("Invalid JSON response from %s: %s", url, repr(e))
+                error_msg = f"Invalid JSON response from {url}: {repr(e)}"
+                LOGGER(__name__).error(error_msg)
                 return None
 
             except Exception as e:
-                LOGGER(__name__).error("Unexpected error for %s: %s", url, repr(e))
+                error_msg = f"Unexpected error for {url}: {repr(e)}"
+                LOGGER(__name__).error(error_msg)
                 return None
 
             await asyncio.sleep(backoff_factor * (2 ** attempt))
@@ -180,6 +175,12 @@ class HttpxClient:
         if isinstance(e, httpx.TooManyRedirects):
             return f"Too many redirects for {url}: {repr(e)}"
         elif isinstance(e, httpx.HTTPStatusError):
+            try:
+                error_response = e.response.json()
+                if isinstance(error_response, dict) and "error" in error_response:
+                    return f"HTTP error {e.response.status_code} for {url}: {error_response['error']}"
+            except ValueError:
+                pass
             return f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
         elif isinstance(e, httpx.ReadTimeout):
             return f"Read timeout for {url}: {repr(e)}"
