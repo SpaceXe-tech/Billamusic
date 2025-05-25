@@ -58,6 +58,11 @@ class YouTubeUtils:
             if not dl_url:
                 LOGGER(__name__).error(f"Response from API is empty")
                 return None
+
+            if not re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", dl_url):
+                dl = await HttpxClient().download_file(f"{API_URL}/stream?uuid={dl_url}")
+                return dl.file_path if dl.success else None
+            
             try:
                 msg = await app.get_messages(message_ids=dl_url)
                 if not msg:
