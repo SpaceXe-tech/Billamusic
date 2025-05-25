@@ -25,7 +25,7 @@ class DownloadResult:
 
 
 class HttpxClient:
-    DEFAULT_TIMEOUT = 60
+    DEFAULT_TIMEOUT = 120
     DEFAULT_DOWNLOAD_TIMEOUT = 180
     CHUNK_SIZE = 8192
     MAX_RETRIES = 2
