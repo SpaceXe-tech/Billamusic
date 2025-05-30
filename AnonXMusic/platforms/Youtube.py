@@ -41,7 +41,7 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_api(video_id: str) -> Optional[Path]:
+    async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
         Download audio using the API.
         """
@@ -53,7 +53,7 @@ class YouTubeUtils:
             return None
 
         from AnonXMusic import app
-        if public_url := await HttpxClient().make_request(f"{API_URL}/yt?id={video_id}"):
+        if public_url := await HttpxClient().make_request(f"{API_URL}/yt?id={video_id}&video={is_video}"):
             dl_url = public_url.get("results")
             if not dl_url:
                 LOGGER(__name__).error(f"Response from API is empty")
@@ -181,6 +181,9 @@ class YouTubeAPI:
         return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
+        if dl := await YouTubeUtils.download_with_api(link, True):
+            return True, str(dl)
+
         if videoid:
             link = self.base + link
         if "&" in link:
@@ -384,13 +387,15 @@ class YouTubeAPI:
             x.download([link])
 
         if songvideo:
+            if dl := await YouTubeUtils.download_with_api(link, True):
+                return str(dl)
+
             await loop.run_in_executor(None, song_video_dl)
             fpath = f"downloads/{title}.mp4"
             return fpath
         elif songaudio:
             if dl := await YouTubeUtils.download_with_api(link):
                 return str(dl)
-
             await loop.run_in_executor(None, song_audio_dl)
             fpath = f"downloads/{title}.mp3"
             return fpath
@@ -399,6 +404,9 @@ class YouTubeAPI:
                 direct = True
                 downloaded_file = await loop.run_in_executor(None, video_dl)
             else:
+                if dl := await YouTubeUtils.download_with_api(link, True):
+                    return str(dl), direct
+
                 proc = await asyncio.create_subprocess_exec(
                     "yt-dlp",
                     "--cookies", YouTubeUtils.get_cookie_file(),
