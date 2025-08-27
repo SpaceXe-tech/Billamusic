@@ -47,36 +47,39 @@ class YouTubeUtils:
         """
         if API_URL is None or API_KEY is None:
             return None
-
         if video_id is None:
             LOGGER(__name__).warning("Video ID is None")
             return None
 
         from AnonXMusic import app
-        if public_url := await HttpxClient().make_request(f"{API_URL}/yt?id={video_id}&video={is_video}"):
-            dl_url = public_url.get("results")
-            if not dl_url:
-                LOGGER(__name__).error(f"Response from API is empty")
-                return None
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        get_track = await HttpxClient().make_request(f"{API_URL}/track?url={video_url}&video={is_video}")
+        if not get_track:
+            LOGGER(__name__).error(f"Response from API is empty")
+            return None
 
-            if not re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", dl_url):
-                dl = await HttpxClient().download_file(dl_url)
-                return dl.file_path if dl.success else None
+        cdn_url = get_track.get("cdnurl")
+        if not cdn_url:
+            LOGGER(__name__).error("CDN URL not found in response")
+            return None
 
-            try:
-                msg = await app.get_messages(message_ids=dl_url)
-                if not msg:
-                    LOGGER(__name__).error("Message not found in pyrogram channel")
-                    return None
-                path = await msg.download()
-                return path
-            except errors.FloodWait as e:
-                await asyncio.sleep(e.value+1)
-                return await YouTubeUtils.download_with_api(video_id)
-            except Exception as e:
-                LOGGER(__name__).error(f"Error getting message from pyrogram channel: {e}")
+        if not re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", cdn_url):
+            dl = await HttpxClient().download_file(cdn_url)
+            return dl.file_path if dl.success else None
+
+        try:
+            msg = await app.get_messages(message_ids=cdn_url)
+            if not msg:
+                LOGGER(__name__).error("Message not found in pyrogram channel")
                 return None
-        return None
+            path = await msg.download()
+            return path
+        except errors.FloodWait as e:
+            await asyncio.sleep(e.value + 1)
+            return await YouTubeUtils.download_with_api(video_id)
+        except Exception as e:
+            LOGGER(__name__).error(f"Error getting message from pyrogram channel: {e}")
+            return None
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
