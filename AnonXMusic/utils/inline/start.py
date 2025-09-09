@@ -29,6 +29,12 @@ def private_panel(_):
         ],
         [
             InlineKeyboardButton(
+                text="ᴡᴇʙ ᴘʟᴀʏᴇʀ",
+                url=f"https://t.me/{app.username.lstrip('@')}?startapp"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
                 text="ʟᴀɴɢᴜᴀɢᴇ",
                 callback_data="LG"
             ),
