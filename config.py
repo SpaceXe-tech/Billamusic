@@ -18,7 +18,7 @@ MONGO_DB_URI = getenv("MONGO_DB_URI", None)
 
 
 # Cookie URL (Pastebin, Batbin, or direct .txt link in Netscape format)
-COOKIE_URL = os.getenv("COOKIE_URL", None)
+COOKIE_URL = getenv("COOKIE_URL", None)
 
 DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", 3600))
 
