@@ -117,7 +117,8 @@ async def get_thumb(videoid: str):
         # Watermark
         watermark_font = ImageFont.truetype("AnonXMusic/assets/font2.ttf", 24)
         watermark_text = "Billa=Music"
-        text_size = draw.textsize(watermark_text, font=watermark_font)
+        bbox = draw.textbbox((0, 0), watermark_text, font=watermark_font)
+        text_size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
         x = background.width - text_size[0] - 25
         y = background.height - text_size[1] - 25
         glow_pos = [(x + dx, y + dy) for dx in (-1, 1) for dy in (-1, 1)]
