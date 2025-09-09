@@ -54,6 +54,11 @@ class YouTubeUtils:
             return None
 
         try:
+            # Ensure we only pass the ID to API (not full URL)
+            match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
+            if match:
+                video_id = match.group(1)
+
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
 
@@ -69,9 +74,13 @@ class YouTubeUtils:
             # If Telegram message link
             if re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
                 try:
-                    msg = await app.get_messages(message_ids=result_url)
-                    if msg:
-                        return await msg.download()
+                    # Extract chat_id and message_id
+                    tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
+                    if tg_match:
+                        chat_username, msg_id = tg_match.groups()
+                        msg = await app.get_messages(chat_username, int(msg_id))
+                        if msg:
+                            return await msg.download()
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value + 1)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
