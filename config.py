@@ -28,6 +28,10 @@ LOGGER_ID = int(getenv("LOGGER_ID", None))
 # Get this value from @FallenxBot on Telegram by /id
 OWNER_ID = int(getenv("OWNER_ID", 5960968099))
 
+SONG_DUMP_ID = int(getenv("SONG_DUMP_ID", None))
+
+
+
 ## Fill these variables if you're deploying on heroku.
 # Your heroku app name
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
@@ -81,6 +85,7 @@ autoclean = []
 confirmer = {}
 
 API_URL = getenv("API_URL")
+API_URL2 = getenv("API_URL2")
 API_KEY = getenv("API_KEY")
 DOWNLOADS_DIR = "downloads"
 
@@ -91,12 +96,12 @@ PING_IMG_URL = getenv(
     "PING_IMG_URL", "https://te.legra.ph/file/b8a0c1a00db3e57522b53.jpg"
 )
 PLAYLIST_IMG_URL = "https://te.legra.ph/file/4ec5ae4381dffb039b4ef.jpg"
-STATS_IMG_URL = "https://te.legra.ph/file/e906c2def5afe8a9b9120.jpg"
-TELEGRAM_AUDIO_URL = "https://te.legra.ph/file/6298d377ad3eb46711644.jpg"
-TELEGRAM_VIDEO_URL = "https://te.legra.ph/file/6298d377ad3eb46711644.jpg"
+STATS_IMG_URL = "https://files.catbox.moe/6bt0uw.jpg"
+TELEGRAM_AUDIO_URL = "https://files.catbox.moe/6bt0uw.jpg"
+TELEGRAM_VIDEO_URL = "https://files.catbox.moe/6bt0uw.jpg"
 STREAM_IMG_URL = "https://te.legra.ph/file/bd995b032b6bd263e2cc9.jpg"
-SOUNCLOUD_IMG_URL = "https://te.legra.ph/file/bb0ff85f2dd44070ea519.jpg"
-YOUTUBE_IMG_URL = "https://te.legra.ph/file/6298d377ad3eb46711644.jpg"
+SOUNCLOUD_IMG_URL = "https://files.catbox.moe/6bt0uw.jpg"
+YOUTUBE_IMG_URL = "https://files.catbox.moe/6bt0uw.jpg"
 SPOTIFY_ARTIST_IMG_URL = "https://te.legra.ph/file/37d163a2f75e0d3b403d6.jpg"
 SPOTIFY_ALBUM_IMG_URL = "https://te.legra.ph/file/b35fd1dfca73b950b1b05.jpg"
 SPOTIFY_PLAYLIST_IMG_URL = "https://te.legra.ph/file/95b3ca7993bbfaf993dcb.jpg"
