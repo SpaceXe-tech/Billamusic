@@ -48,17 +48,18 @@ class YouTubeUtils:
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
         Download audio/video using the new API (uses API_URL + API_KEY).
+        Handles Telegram media or direct CDN links based on API response.
         """
         if not video_id:
             LOGGER(__name__).warning("Video ID is None")
             return None
-        
+
         try:
-            from AnonXMusic import app  # Local import inside function (if needed)
+            from AnonXMusic import app  # Local import inside function
 
             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            if re.match("^https?://", video_id):
+            if re.match(r"^https?://", video_id):
                 video_url = video_id
 
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
@@ -68,31 +69,39 @@ class YouTubeUtils:
                 LOGGER(__name__).error("API response empty")
                 return None
 
+            # If API returns a message indicating file missing but still provides URL
+            msg = res.get("message")
             result_url = res.get("results")
             if not result_url:
                 LOGGER(__name__).error("No 'results' in API response")
                 return None
 
-            # If Telegram message link
-            if re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+            source = res.get("source", "")
+
+            # If the result is a Telegram message link from database source
+            if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
                 try:
-                    # Extract chat_id and message_id
                     tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
                     if tg_match:
                         chat_username, msg_id = tg_match.groups()
-                        msg = await app.get_messages(chat_username, int(msg_id))
-                        if msg:
-                            return await msg.download()
+                        msg_obj = await app.get_messages(chat_username, int(msg_id))
+                        if msg_obj:
+                            return await msg_obj.download()
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value + 0)
-                    return await download_with_api(video_id, is_video)
+                    return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
-                    LOGGER(__name__).error(f"API tg fetch error: {e}")
+                    LOGGER(__name__).error(f"Telegram fetch error: {e}")
                     return None
 
-            # Otherwise it's a direct CDN link
-            dl = await HttpxClient().download_file(result_url)
-            return dl.file_path if dl.success else None
+            # If source is download_api or fallback — direct CDN link download
+            if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
+                dl = await HttpxClient().download_file(result_url)
+                return dl.file_path if dl.success else None
+
+            # Unknown or unsupported source
+            LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
+            return None
 
         except Exception as e:
             LOGGER(__name__).error(f"API error: {e}")
