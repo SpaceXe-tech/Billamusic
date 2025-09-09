@@ -52,14 +52,16 @@ class YouTubeUtils:
         if not video_id:
             LOGGER(__name__).warning("Video ID is None")
             return None
+        
+        try:
+            from AnonXMusic import app  # Local import inside function (if needed)
 
-        from AnonXMusic import app
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        if re.match("^https?://", video_id):
-            video_url = video_id
+            if re.match("^https?://", video_id):
+                video_url = video_id
 
-            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
+            api_url = f"{YouTubeUtils.API_URL}?api_key={YouTubeUtils.API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
 
             if not res:
@@ -95,6 +97,7 @@ class YouTubeUtils:
         except Exception as e:
             LOGGER(__name__).error(f"API error: {e}")
             return None
+
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
