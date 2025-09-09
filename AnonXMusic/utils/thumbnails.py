@@ -109,7 +109,7 @@ async def get_thumb(videoid: str):
         draw = ImageDraw.Draw(background)
         font_info = ImageFont.truetype("AnonXMusic/assets/font2.ttf", 28)
         font_time = ImageFont.truetype("AnonXMusic/assets/font2.ttf", 26)
-        font_path = "AnonXMusic/assets/font3.ttf"
+        font_path = "AnonXMusic/assets/font.ttf"
 
         # Title
         title_max_width = 540
