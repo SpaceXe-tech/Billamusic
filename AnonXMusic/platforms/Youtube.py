@@ -62,7 +62,7 @@ class YouTubeUtils:
                 video_url = video_id
 
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
-            res = await HttpxClient().make_request(api_url)
+            res = await HttpxClient().make_request(api_url, timeout=10)
 
             if not res:
                 LOGGER(__name__).error("API response empty")
@@ -84,8 +84,8 @@ class YouTubeUtils:
                         if msg:
                             return await msg.download()
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
-                    return await YouTubeUtils.download_with_api(video_id, is_video)
+                    await asyncio.sleep(e.value + 0)
+                    return await download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"API tg fetch error: {e}")
                     return None
