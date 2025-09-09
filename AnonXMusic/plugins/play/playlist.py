@@ -8,7 +8,7 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import BANNED_USERS
-from AnonXMusic import app
+from AnonXMusic import Carbon, Youtube, app
 from AnonXMusic.utils.database import (
     delete_playlist,
     get_playlist,
@@ -18,7 +18,7 @@ from AnonXMusic.utils.database import (
 from AnonXMusic.utils.decorators import language, languageCB
 from AnonXMusic.utils.decorators.play import botplaylist_markup
 from AnonXMusic.utils.inline.playlist import get_playlist_markup, warning_markup
-from AnonXMusic.utils.pastebin import Anonybin
+from AnonXMusic.utils.pastebin import AnonyBin
 from AnonXMusic.utils.stream.stream import stream
 
 PLAYLIST_COMMAND : ["playlist"]
@@ -46,13 +46,13 @@ async def check_playlist(client, message: Message, _):
         count += 1
         msg += f"\n\n{count}- {title[:70]}\n"
         msg += _["playlist_5"].format(duration)
-    link = await Anonybin(msg)
+    link = await AnonyBin(msg)
     lines = msg.count("\n")
     if lines >= 17:
         car = os.linesep.join(msg.split(os.linesep)[:17])
     else:
         car = msg
-    carbon = await Platform.carbon.generate(car, randint(100, 10000000000))
+    carbon = await Carbon.generate(car, randint(100, 10000000000))
     await get.delete()
     await message.reply_photo(carbon, caption=_["playlist_15"].format(link))
 
@@ -252,7 +252,7 @@ async def add_playlist(client, message: Message, _):
 
         except Exception as e:
             return await message.reply_text(
-                f"Looking like not a valid youtube playlist url or\nPlaylist created by YouTube Not Supported"
+                f"Looking like not a valid youtube playlist url or\nCreated Playlist is not Supported By YouTube itself"
             )
 
         user_id = message.from_user.id
@@ -270,7 +270,7 @@ async def add_playlist(client, message: Message, _):
 
             m = await message.reply(_["playlist_21"])
             title, duration_min, duration_sec, thumbnail, videoid = (
-                await Platform.youtube.details(videoid, True)
+                await Youtube.details(videoid, True)
             )
             title = (title[:50]).title()
             plist = {
@@ -327,7 +327,7 @@ async def add_playlist(client, CallbackQuery, _):
         duration_sec,
         thumbnail,
         vidid,
-    ) = await Platform.youtube.details(videoid, True)
+    ) = await Youtube.details(videoid, True)
     title = (title[:50]).title()
     plist = {
         "videoid": vidid,
