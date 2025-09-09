@@ -61,7 +61,7 @@ class YouTubeUtils:
             if re.match("^https?://", video_id):
                 video_url = video_id
 
-            api_url = f"{YouTubeUtils.API_URL}?api_key={YouTubeUtils.API_KEY}&id={video_id}"
+            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
 
             if not res:
