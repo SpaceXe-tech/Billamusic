@@ -1,3 +1,7 @@
+#  Copyright (c) 2025 AshokShau
+#  Licensed under the GNU AGPL v3.0: https://www.gnu.org/licenses/agpl-3.0.html
+#  Part of the TgMusicBot project. All rights reserved where applicable.
+
 import asyncio
 import re
 import time
@@ -61,6 +65,7 @@ class HttpxClient:
             headers["X-API-Key"] = API_KEY
         return headers
 
+
     async def download_file(
         self,
         url: str,
@@ -119,11 +124,11 @@ class HttpxClient:
                 response.raise_for_status()
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
-                return await response.json()  # Correctly await async json()
+                return response.json()
 
             except httpx.HTTPStatusError as e:
                 try:
-                    error_response = e.response.json()  # synchronous here, no await
+                    error_response = e.response.json()
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
                     else:
@@ -138,7 +143,7 @@ class HttpxClient:
 
             except httpx.TooManyRedirects as e:
                 error_msg = f"Redirect loop for {url}: {repr(e)}"
-                LOGGER(__name__).warning(error_msg)
+                LOGGER.warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
