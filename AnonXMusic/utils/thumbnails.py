@@ -12,7 +12,7 @@ from youtubesearchpython.__future__ import VideosSearch
 def changeImageSize(maxWidth, maxHeight, image):
     ratio = min(maxWidth / image.size[0], maxHeight / image.size[1])
     newSize = (int(image.size[0] * ratio), int(image.size[1] * ratio))
-    return image.resize(newSize, Image.ANTIALIAS)
+    return image.resize(newSize, Image.Resampling.LANCZOS)
 
 
 def truncate(text, max_chars=50):
@@ -51,7 +51,7 @@ def fit_text(draw, text, max_width, font_path, start_size, min_size):
 
 
 def create_rounded_square(image, size, radius=50):
-    image = image.resize((size, size), Image.ANTIALIAS).convert("RGBA")
+    image = image.resize((size, size), Image.Resampling.LANCZOS).convert("RGBA")
     rounded_mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(rounded_mask)
     draw.rounded_rectangle((0, 0, size, size), radius=radius, fill=255)
