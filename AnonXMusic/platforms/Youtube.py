@@ -4,7 +4,7 @@ import random
 import re
 from pathlib import Path
 from typing import Union, Optional
-from AnonXMusic import app
+
 import yt_dlp
 from pyrogram import errors
 from pyrogram.enums import MessageEntityType
@@ -53,11 +53,11 @@ class YouTubeUtils:
             LOGGER(__name__).warning("Video ID is None")
             return None
 
-        try:
-            # Ensure we only pass the ID to API (not full URL)
-            match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
-            if match:
-                video_id = match.group(1)
+        from AnonXMusic import app
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        if re.match("^https?://", video_id):
+            video_url = video_id
 
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
