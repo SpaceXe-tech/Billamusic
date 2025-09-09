@@ -7,6 +7,7 @@ import traceback
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 from youtubesearchpython.__future__ import VideosSearch
+from config import YOUTUBE_IMG_URL  # fallback image URL
 
 
 def changeImageSize(maxWidth, maxHeight, image):
@@ -79,6 +80,17 @@ async def get_thumb(videoid: str):
                     await f.close()
 
         youtube = Image.open(f"cache/thumb{videoid}.png")
+    except Exception:
+        # fallback to default image if anything fails
+        async with aiohttp.ClientSession() as session:
+            async with session.get(YOUTUBE_IMG_URL) as resp:
+                if resp.status == 200:
+                    f = await aiofiles.open(f"cache/thumb{videoid}.png", mode="wb")
+                    await f.write(await resp.read())
+                    await f.close()
+        youtube = Image.open(f"cache/thumb{videoid}.png")
+
+    try:
         image1 = changeImageSize(1280, 720, youtube)
         image2 = image1.convert("RGBA")
 
@@ -138,6 +150,6 @@ async def get_thumb(videoid: str):
         background.save(tpath)
         return tpath
 
-    except:
+    except Exception:
         traceback.print_exc()
         return None
