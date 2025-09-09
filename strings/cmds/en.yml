@@ -1,0 +1,6 @@
+PLAYLIST_COMMAND : ["playlist"]
+PLAY_PLAYLIST_COMMAND : ["playplaylist", "vplayplaylist"]
+DELETE_PLAYLIST_COMMAND : ["deleteplaylist", "delplaylist"]
+ADD_PLAYLIST_COMMAND : ["addplaylist"]
+
+GSTATS_COMMAND : ["gstats"]
