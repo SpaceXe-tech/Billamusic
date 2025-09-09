@@ -18,9 +18,12 @@ langdb = mongodb.language
 onoffdb = mongodb.onoffper
 playmodedb = mongodb.playmode
 playtypedb = mongodb.playtypedb
+playlistdb = mongodb.playlist
 skipdb = mongodb.skipmode
 sudoersdb = mongodb.sudoers
 usersdb = mongodb.tgusersdb
+queriesdb = mongodb.queries
+chattopdb = mongodb.chatstats
 
 # Shifting to memory [mongo sucks often]
 active = []
@@ -37,6 +40,7 @@ pause = {}
 playmode = {}
 playtype = {}
 skipmode = {}
+playlist = []
 
 
 async def get_assistant_number(chat_id: int) -> str:
@@ -150,6 +154,166 @@ async def group_assistant(self, chat_id: int) -> int:
         return self.four
     elif int(assis) == 5:
         return self.five
+
+
+
+async def _get_playlists(chat_id: int) -> Dict[str, int]:
+    _notes = await playlistdb.find_one({"chat_id": chat_id})
+    if not _notes:
+        return {}
+    return _notes["notes"]
+
+
+async def get_playlist_names(chat_id: int) -> List[str]:
+    _notes = []
+    for note in await _get_playlists(chat_id):
+        _notes.append(note)
+    return _notes
+
+
+async def get_playlist(chat_id: int, name: str) -> Union[bool, dict]:
+    name = name
+    _notes = await _get_playlists(chat_id)
+    if name in _notes:
+        return _notes[name]
+    else:
+        return False
+
+
+async def save_playlist(chat_id: int, name: str, note: dict):
+    name = name
+    _notes = await _get_playlists(chat_id)
+    _notes[name] = note
+    await playlistdb.update_one(
+        {"chat_id": chat_id}, {"$set": {"notes": _notes}}, upsert=True
+    )
+
+
+async def delete_playlist(chat_id: int, name: str) -> bool:
+    notesd = await _get_playlists(chat_id)
+    name = name
+    if name in notesd:
+        del notesd[name]
+        await playlistdb.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"notes": notesd}},
+            upsert=True,
+        )
+        return True
+    return False
+
+
+
+
+
+async def get_queries() -> int:
+    chat_id = 98324
+    mode = await queriesdb.find_one({"chat_id": chat_id})
+    if not mode:
+        return 0
+    return mode["mode"]
+
+
+async def set_queries(mode: int):
+    chat_id = 98324
+    queries = await queriesdb.find_one({"chat_id": chat_id})
+    if queries:
+        mode = queries["mode"] + mode
+    return await queriesdb.update_one(
+        {"chat_id": chat_id}, {"$set": {"mode": mode}}, upsert=True
+    )
+
+
+# Top Chats DB
+async def get_top_chats() -> dict:
+    results = {}
+    async for chat in chattopdb.find({"chat_id": {"$lt": 0}}):
+        chat_id = chat["chat_id"]
+        total = 0
+        for i in chat["vidid"]:
+            counts_ = chat["vidid"][i]["spot"]
+            if counts_ > 0:
+                total += counts_
+                results[chat_id] = total
+    return results
+
+
+async def get_global_tops() -> dict:
+    results = {}
+    async for chat in chattopdb.find({"chat_id": {"$lt": 0}}):
+        for i in chat["vidid"]:
+            counts_ = chat["vidid"][i]["spot"]
+            title_ = chat["vidid"][i]["title"]
+            if counts_ > 0:
+                if i not in results:
+                    results[i] = {}
+                    results[i]["spot"] = counts_
+                    results[i]["title"] = title_
+                else:
+                    spot = results[i]["spot"]
+                    count_ = spot + counts_
+                    results[i]["spot"] = count_
+    return results
+
+
+async def get_particulars(chat_id: int) -> Dict[str, int]:
+    ids = await chattopdb.find_one({"chat_id": chat_id})
+    if not ids:
+        return {}
+    return ids["vidid"]
+
+
+async def get_particular_top(chat_id: int, name: str) -> Union[bool, dict]:
+    ids = await get_particulars(chat_id)
+    if name in ids:
+        return ids[name]
+
+
+async def update_particular_top(chat_id: int, name: str, vidid: dict):
+    ids = await get_particulars(chat_id)
+    ids[name] = vidid
+    await chattopdb.update_one(
+        {"chat_id": chat_id}, {"$set": {"vidid": ids}}, upsert=True
+    )
+
+
+# Top User DB
+async def get_userss(chat_id: int) -> Dict[str, int]:
+    ids = await userdb.find_one({"chat_id": chat_id})
+    if not ids:
+        return {}
+    return ids["vidid"]
+
+
+async def delete_userss(chat_id: int) -> bool:
+    result = await userdb.delete_one({"chat_id": chat_id})
+    return result.deleted_count > 0
+
+
+async def get_user_top(chat_id: int, name: str) -> Union[bool, dict]:
+    ids = await get_userss(chat_id)
+    if name in ids:
+        return ids[name]
+
+
+async def update_user_top(chat_id: int, name: str, vidid: dict):
+    ids = await get_userss(chat_id)
+    ids[name] = vidid
+    await userdb.update_one({"chat_id": chat_id}, {"$set": {"vidid": ids}}, upsert=True)
+
+
+async def get_topp_users() -> dict:
+    results = {}
+    async for chat in userdb.find({"chat_id": {"$gt": 0}}):
+        user_id = chat["chat_id"]
+        total = 0
+        for i in chat["vidid"]:
+            counts_ = chat["vidid"][i]["spot"]
+            if counts_ > 0:
+                total += counts_
+        results[user_id] = total
+    return results
+
 
 
 async def is_skipmode(chat_id: int) -> bool:
@@ -644,3 +808,4 @@ async def remove_banned_user(user_id: int):
     if not is_gbanned:
         return
     return await blockeddb.delete_one({"user_id": user_id})
+
