@@ -124,17 +124,17 @@ class HttpxClient:
                 response.raise_for_status()
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
-                return response.json()
+                return await response.json()  # <- FIXED: properly await JSON parsing
 
             except httpx.HTTPStatusError as e:
                 try:
-                    error_response = e.response.json()
+                    error_response = await e.response.json()
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
                     else:
-                        error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                        error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {await e.response.text()}"
                 except ValueError:
-                    error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                    error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {await e.response.text()}"
 
                 LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
@@ -143,7 +143,7 @@ class HttpxClient:
 
             except httpx.TooManyRedirects as e:
                 error_msg = f"Redirect loop for {url}: {repr(e)}"
-                LOGGER.warning(error_msg)
+                LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
@@ -176,6 +176,7 @@ class HttpxClient:
             return f"Too many redirects for {url}: {repr(e)}"
         elif isinstance(e, httpx.HTTPStatusError):
             try:
+                # Await JSON parsing here as well for error responses
                 error_response = e.response.json()
                 if isinstance(error_response, dict) and "error" in error_response:
                     return f"HTTP error {e.response.status_code} for {url}: {error_response['error']}"
