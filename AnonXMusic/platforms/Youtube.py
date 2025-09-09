@@ -20,7 +20,7 @@ from config import API_URL, API_KEY
 class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
-        """Get a random cookie file from the 'cookies' directory."""
+        """Get a random cookie file from the 'cookies' directory, skipping 'cookie_time.txt'."""
         cookie_dir = "AnonXMusic/assets"
         try:
             if not os.path.exists(cookie_dir):
@@ -28,7 +28,10 @@ class YouTubeUtils:
                 return None
 
             files = os.listdir(cookie_dir)
-            cookies_files = [f for f in files if f.endswith(".txt")]
+            # Skip 'cookie_time.txt' and any non-.txt files
+            cookies_files = [
+                f for f in files if f.endswith(".txt") and f != "cookie_time.txt"
+            ]
 
             if not cookies_files:
                 LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
@@ -36,6 +39,7 @@ class YouTubeUtils:
 
             random_file = random.choice(cookies_files)
             return os.path.join(cookie_dir, random_file)
+
         except Exception as e:
             LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
             return None
