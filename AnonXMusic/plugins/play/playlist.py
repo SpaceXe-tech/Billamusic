@@ -22,14 +22,15 @@ from AnonXMusic.utils.inline.playlist import get_playlist_markup, warning_markup
 from AnonXMusic.utils.pastebin import AnonyBin
 from AnonXMusic.utils.stream.stream import stream
 
-PLAYLIST_COMMAND : ["playlist"]
-PLAY_PLAYLIST_COMMAND : ["playplaylist", "vplayplaylist"]
-DELETE_PLAYLIST_COMMAND : ["deleteplaylist", "delplaylist"]
-ADD_PLAYLIST_COMMAND : ["addplaylist"]
+PLAYLIST_COMMAND = ["playlist"]
+PLAY_PLAYLIST_COMMAND = ["playplaylist", "vplayplaylist"]
+DELETE_PLAYLIST_COMMAND = ["deleteplaylist", "delplaylist"]
+ADD_PLAYLIST_COMMAND = ["addplaylist"]
 
 
 
-@app.on_message(filters.command("PLAYLIST_COMMAND") & ~BANNED_USERS)
+
+@app.on_message(filters.command(PLAYLIST_COMMAND) & ~BANNED_USERS)
 @language
 async def check_playlist(client, message: Message, _):
     _playlist = await get_playlist_names(message.from_user.id)
@@ -82,7 +83,7 @@ async def get_keyboard(_, user_id):
     return keyboard, count
 
 
-@app.on_message(filters.command("DELETE_PLAYLIST_COMMAND") & filters.group & ~BANNED_USERS)
+@app.on_message(filters.command(DELETE_PLAYLIST_COMMAND) & filters.group & ~BANNED_USERS)
 @language
 async def del_group_message(client, message: Message, _):
     upl = InlineKeyboardMarkup(
@@ -122,7 +123,7 @@ async def get_keyboard(_, user_id):
     return keyboard, count
 
 
-@app.on_message(filters.command("DELETE_PLAYLIST_COMMAND") & filters.private & ~BANNED_USERS)
+@app.on_message(filters.command(DELETE_PLAYLIST_COMMAND) & filters.private & ~BANNED_USERS)
 @language
 async def del_plist_msg(client, message: Message, _):
     _playlist = await get_playlist_names(message.from_user.id)
@@ -180,7 +181,7 @@ async def play_playlist(client, CallbackQuery, _):
     return await mystic.delete()
 
 
-@app.on_message(filters.command("PLAY_PLAYLIST_COMMAND") & ~BANNED_USERS & filters.group)
+@app.on_message(filters.command(PLAY_PLAYLIST_COMMAND) & ~BANNED_USERS & filters.group)
 @languageCB
 async def play_playlist_command(client, message, _):
     mode = message.command[0][0]
