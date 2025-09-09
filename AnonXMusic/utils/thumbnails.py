@@ -132,9 +132,10 @@ async def get_thumb(videoid: str):
         # Dynamic Watermark
         watermark_font = ImageFont.truetype("AnonXMusic/assets/font2.ttf", 24)
         watermark_text = f"by {app.name}"
-        text_size = draw.textsize(watermark_text, font=watermark_font)
-        x = background.width - text_size[0] - 25
-        y = background.height - text_size[1] - 25
+        text_width = draw.textlength(watermark_text, font=watermark_font)
+        text_height = watermark_font.getbbox(watermark_text)[3]  # height from bbox
+        x = background.width - text_width - 25
+        y = background.height - text_height - 25
         glow_pos = [(x + dx, y + dy) for dx in (-1, 1) for dy in (-1, 1)]
         for pos in glow_pos:
             draw.text(pos, watermark_text, font=watermark_font, fill=(0, 0, 0, 180))
