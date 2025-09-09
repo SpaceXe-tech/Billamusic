@@ -42,51 +42,49 @@ class YouTubeUtils:
 
         except Exception as e:
             LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
-            return None
+
 
     @staticmethod
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
-        Download audio using the API.
+        Download audio/video using the new API (uses API_URL + API_KEY).
         """
-        if API_URL is None or API_KEY is None:
-            return None
-        if video_id is None:
+        if not video_id:
             LOGGER(__name__).warning("Video ID is None")
             return None
 
-        from AnonXMusic import app
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
+            res = await HttpxClient().make_request(api_url)
 
-        if re.match("^https?://", video_id):
-            video_url = video_id
+            if not res:
+                LOGGER(__name__).error("API response empty")
+                return None
 
-        get_track = await HttpxClient().make_request(f"{API_URL}/track?url={video_url}&video={is_video}")
-        if not get_track:
-            LOGGER(__name__).error(f"Response from API is empty")
-            return None
+            result_url = res.get("results")
+            if not result_url:
+                LOGGER(__name__).error("No 'results' in API response")
+                return None
 
-        cdn_url = get_track.get("cdnurl")
-        if not cdn_url:
-            LOGGER(__name__).error("CDN URL not found in response")
-            return None
+            # If Telegram message link
+            if re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+                try:
+                    msg = await app.get_messages(message_ids=result_url)
+                    if msg:
+                        return await msg.download()
+                except errors.FloodWait as e:
+                    await asyncio.sleep(e.value + 1)
+                    return await YouTubeUtils.download_with_api(video_id, is_video)
+                except Exception as e:
+                    LOGGER(__name__).error(f"API tg fetch error: {e}")
+                    return None
 
-        if not re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", cdn_url):
-            dl = await HttpxClient().download_file(cdn_url)
+            # Otherwise it's a direct CDN link
+            dl = await HttpxClient().download_file(result_url)
             return dl.file_path if dl.success else None
 
-        try:
-            msg = await app.get_messages(message_ids=cdn_url)
-            if not msg:
-                LOGGER(__name__).error("Message not found in pyrogram channel")
-                return None
-            path = await msg.download()
-            return path
-        except errors.FloodWait as e:
-            await asyncio.sleep(e.value + 1)
-            return await YouTubeUtils.download_with_api(video_id)
         except Exception as e:
-            LOGGER(__name__).error(f"Error getting message from pyrogram channel: {e}")
+            LOGGER(__name__).error(f"API error: {e}")
             return None
 
 async def shell_cmd(cmd):
