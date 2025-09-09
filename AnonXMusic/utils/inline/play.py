@@ -30,7 +30,7 @@ def track_markup(_, videoid, user_id, channel, fplay):
 def stream_markup_timer(_, chat_id, played, dur):
     played_sec = time_to_seconds(played)
     duration_sec = time_to_seconds(dur)
-    percentage = (played_sec / duration_sec) * 100
+    percentage = (played_sec / duration_sec) * 100 if duration_sec > 0 else 0
     umm = math.floor(percentage)
     if 0 < umm <= 10:
         bar = "◉—————————"
@@ -85,6 +85,7 @@ def stream_markup(_, chat_id):
     return buttons
 
 
+# Playlist buttons only available where videoid & user_id accessible
 def playlist_markup(_, videoid, user_id, ptype, channel, fplay):
     buttons = [
         [
@@ -95,6 +96,17 @@ def playlist_markup(_, videoid, user_id, ptype, channel, fplay):
             InlineKeyboardButton(
                 text=_["P_B_2"],
                 callback_data=f"AnonyPlaylists {videoid}|{user_id}|{ptype}|v|{channel}|{fplay}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text="➕ Add", callback_data=f"add_playlist {videoid}"
+            ),
+            InlineKeyboardButton(
+                text="❌ Remove", callback_data=f"remove_playlist {videoid}"
+            ),
+            InlineKeyboardButton(
+                text="🗑 Delete", callback_data=f"del_playlist {videoid}"
             ),
         ],
         [
@@ -144,8 +156,7 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
                 callback_data=f"slider B|{query_type}|{query}|{user_id}|{channel}|{fplay}",
             ),
             InlineKeyboardButton(
-                text=_["CLOSE_BUTTON"],
-                callback_data=f"forceclose {query}|{user_id}",
+                text=_["CLOSE_BUTTON"], callback_data=f"forceclose {query}|{user_id}"
             ),
             InlineKeyboardButton(
                 text="▷",
