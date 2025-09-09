@@ -8,8 +8,7 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import BANNED_USERS
-from strings import command
-from AnonXMusic import Platform, app
+from AnonXMusic import app
 from AnonXMusic.utils.database import (
     delete_playlist,
     get_playlist,
@@ -21,6 +20,12 @@ from AnonXMusic.utils.decorators.play import botplaylist_markup
 from AnonXMusic.utils.inline.playlist import get_playlist_markup, warning_markup
 from AnonXMusic.utils.pastebin import Anonybin
 from AnonXMusic.utils.stream.stream import stream
+
+PLAYLIST_COMMAND : ["playlist"]
+PLAY_PLAYLIST_COMMAND : ["playplaylist", "vplayplaylist"]
+DELETE_PLAYLIST_COMMAND : ["deleteplaylist", "delplaylist"]
+ADD_PLAYLIST_COMMAND : ["addplaylist"]
+
 
 
 @app.on_message(command("PLAYLIST_COMMAND") & ~BANNED_USERS)
