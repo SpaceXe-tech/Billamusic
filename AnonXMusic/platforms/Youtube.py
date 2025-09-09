@@ -4,7 +4,7 @@ import random
 import re
 from pathlib import Path
 from typing import Union, Optional
-
+from AnonXMusic import app
 import yt_dlp
 from pyrogram import errors
 from pyrogram.enums import MessageEntityType
