@@ -17,6 +17,10 @@ from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
 from config import API_URL, API_KEY
 
+import re
+from typing import Optional
+from pathlib import Path
+
 class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
@@ -28,10 +32,7 @@ class YouTubeUtils:
                 return None
 
             files = os.listdir(cookie_dir)
-            # Skip 'cookie_time.txt' and any non-.txt files
-            cookies_files = [
-                f for f in files if f.endswith(".txt") and f != "cookie_time.txt"
-            ]
+            cookies_files = [f for f in files if f.endswith(".txt") and f != "cookie_time.txt"]
 
             if not cookies_files:
                 LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
@@ -45,31 +46,41 @@ class YouTubeUtils:
 
 
     @staticmethod
-    async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
+    async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
         """
         Download audio/video using the new API (uses API_URL + API_KEY).
+        If a full YouTube URL is given, extract only video_id and pass to API.
         Handles Telegram media or direct CDN links based on API response.
         """
-        if not video_id:
-            LOGGER(__name__).warning("Video ID is None")
+        if not video_id_or_url:
+            LOGGER(__name__).warning("Video ID or URL is None")
             return None
 
         try:
             from AnonXMusic import app  # Local import inside function
 
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-
-            if re.match(r"^https?://", video_id):
-                video_url = video_id
+            # Extract video_id if full YouTube URL given
+            video_id = video_id_or_url
+            # Regex to extract video id from youtube URL parameters
+            yt_video_id_match = re.search(
+                r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\&|$)", video_id_or_url
+            )
+            if yt_video_id_match:
+                video_id = yt_video_id_match.group(1)
+            elif re.match(r"^[0-9A-Za-z_-]{11}$", video_id_or_url):
+                video_id = video_id_or_url  # Already a valid ID
+            else:
+                # Could not parse valid video_id
+                LOGGER(__name__).warning("Invalid video ID or URL format")
+                return None
 
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
-            res = await HttpxClient().make_request(api_url, timeout=10)
+            res = await HttpxClient().make_request(api_url)
 
             if not res:
                 LOGGER(__name__).error("API response empty")
                 return None
 
-            # If API returns a message indicating file missing but still provides URL
             msg = res.get("message")
             result_url = res.get("results")
             if not result_url:
@@ -78,7 +89,6 @@ class YouTubeUtils:
 
             source = res.get("source", "")
 
-            # If the result is a Telegram message link from database source
             if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
                 try:
                     tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
@@ -94,12 +104,10 @@ class YouTubeUtils:
                     LOGGER(__name__).error(f"Telegram fetch error: {e}")
                     return None
 
-            # If source is download_api or fallback — direct CDN link download
             if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
                 dl = await HttpxClient().download_file(result_url)
                 return dl.file_path if dl.success else None
 
-            # Unknown or unsupported source
             LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
             return None
 
