@@ -1,7 +1,3 @@
-#  Copyright (c) 2025 AshokShau
-#  Licensed under the GNU AGPL v3.0: https://www.gnu.org/licenses/agpl-3.0.html
-#  Part of the TgMusicBot project. All rights reserved where applicable.
-
 import asyncio
 import re
 import time
@@ -65,7 +61,6 @@ class HttpxClient:
             headers["X-API-Key"] = API_KEY
         return headers
 
-
     async def download_file(
         self,
         url: str,
@@ -124,11 +119,11 @@ class HttpxClient:
                 response.raise_for_status()
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
-                return await response.json()  # Await JSON on success only
+                return await response.json()  # Correctly await async json()
 
             except httpx.HTTPStatusError as e:
                 try:
-                    error_response = e.response.json()  # Synchronous in Exception context
+                    error_response = e.response.json()  # synchronous here, no await
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
                     else:
