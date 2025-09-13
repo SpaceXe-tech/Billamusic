@@ -44,26 +44,122 @@ class YouTubeUtils:
         except Exception as e:
             LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
 
+    @staticmethod
+    async def download_with_new_api(
+        video_url: str, 
+        is_video: bool = False, 
+        bitrate: str = "128k", 
+        quality: str = "720p"
+    ) -> Optional[Path]:
+        """
+        Download audio/video using the new POST API.
+        
+        Args:
+            video_url: Full YouTube URL or video ID
+            is_video: Whether to download video (True) or audio (False)
+            bitrate: Audio bitrate (e.g., "128k", "192k", "320k")
+            quality: Video quality (e.g., "720p", "1080p", "480p")
+        
+        Returns:
+            Path to downloaded file or None if failed
+        """
+        if not video_url:
+            LOGGER(__name__).warning("Video URL is None")
+            return None
+
+        try:
+            # API endpoint - update this to your actual API URL
+            api_endpoint = "http://69.62.84.40:8000/api/v1/download"
+            
+            # Prepare request payload
+            payload = {
+                "url": video_url,
+                "bitrate": bitrate,
+                "quality": quality,
+                "x_lang": "en"
+            }
+            
+            # Prepare headers
+            headers = {
+                "accept": "application/json",
+                "x-lang": "en",
+                "Content-Type": "application/json"
+            }
+            
+            # Make POST request to the API
+            response = await HttpxClient().make_request(
+                url=api_endpoint,
+                method="POST",
+                json=payload,
+                headers=headers
+            )
+            
+            if not response:
+                LOGGER(__name__).error("API response is empty")
+                return None
+                
+            # Check if download was successful
+            if not response.get("is_success", False):
+                LOGGER(__name__).error("API returned failure: %s", response)
+                return None
+                
+            # Extract download link
+            download_link = response.get("link")
+            if not download_link:
+                LOGGER(__name__).error("No download link in API response")
+                return None
+                
+            # Get filename and filesize for logging
+            filename = response.get("filename", "unknown")
+            filesize = response.get("filesize", "unknown")
+            
+            LOGGER(__name__).info(f"Downloading: {filename} ({filesize})")
+            
+            # Download the file from the provided link
+            download_result = await HttpxClient().download_file(download_link)
+            
+            if download_result.success:
+                LOGGER(__name__).info(f"Successfully downloaded: {download_result.file_path}")
+                return Path(download_result.file_path)
+            else:
+                LOGGER(__name__).error("Failed to download file from link")
+                return None
+                
+        except Exception as e:
+            LOGGER(__name__).error(f"New API download error: {e}")
+            return None
 
     @staticmethod
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
         """
-        Download audio/video using the new API (uses API_URL + API_KEY).
-        If a full YouTube URL is given, extract only video_id and pass to API.
-        Handles Telegram media or direct CDN links based on API response.
+        Download audio/video using the new POST API first, then fallback to old API.
         """
         if not video_id_or_url:
             LOGGER(__name__).warning("Video ID or URL is None")
             return None
 
         try:
+            # Try new POST API first
+            bitrate = "128k" if not is_video else "192k"
+            quality = "720p" if is_video else "480p"
+            
+            result = await YouTubeUtils.download_with_new_api(
+                video_id_or_url, is_video, bitrate, quality
+            )
+            
+            if result:
+                return result
+                
+            LOGGER(__name__).info("New API failed, trying fallback method...")
+            
+            # Fallback to old API logic (your existing code)
             from AnonXMusic import app  # Local import inside function
 
             # Extract video_id if full YouTube URL given
             video_id = video_id_or_url
             # Regex to extract video id from youtube URL parameters
             yt_video_id_match = re.search(
-                r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\&|$)", video_id_or_url
+                r"(?:v=|/)([0-9A-Za-z_-]{11})(?:&|$)", video_id_or_url
             )
             if yt_video_id_match:
                 video_id = yt_video_id_match.group(1)
@@ -78,20 +174,20 @@ class YouTubeUtils:
             res = await HttpxClient().make_request(api_url)
 
             if not res:
-                LOGGER(__name__).error("API response empty")
+                LOGGER(__name__).error("Fallback API response empty")
                 return None
 
             msg = res.get("message")
             result_url = res.get("results")
             if not result_url:
-                LOGGER(__name__).error("No 'results' in API response")
+                LOGGER(__name__).error("No 'results' in fallback API response")
                 return None
 
             source = res.get("source", "")
 
-            if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+            if source == "database" and re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(d+)", result_url):
                 try:
-                    tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
+                    tg_match = re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(d+)", result_url)
                     if tg_match:
                         chat_username, msg_id = tg_match.groups()
                         msg_obj = await app.get_messages(chat_username, int(msg_id))
@@ -112,7 +208,7 @@ class YouTubeUtils:
             return None
 
         except Exception as e:
-            LOGGER(__name__).error(f"API error: {e}")
+            LOGGER(__name__).error(f"Download error: {e}")
             return None
 
 
