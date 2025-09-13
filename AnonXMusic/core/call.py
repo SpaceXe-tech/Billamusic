@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Union
-
 from pyrogram import Client
 from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls, StreamType
@@ -15,7 +14,6 @@ from pytgcalls.types import Update
 from pytgcalls.types.input_stream import AudioPiped, AudioVideoPiped
 from pytgcalls.types.input_stream.quality import HighQualityAudio, MediumQualityVideo
 from pytgcalls.types.stream import StreamAudioEnded
-
 import config
 from AnonXMusic import LOGGER, YouTube, app
 from AnonXMusic.misc import db
@@ -41,12 +39,10 @@ from strings import get_string
 autoend = {}
 counter = {}
 
-
 async def _clear_(chat_id):
     db[chat_id] = []
     await remove_active_video_chat(chat_id)
     await remove_active_chat(chat_id)
-
 
 class Call(PyTgCalls):
     def __init__(self):
@@ -60,6 +56,7 @@ class Call(PyTgCalls):
             self.userbot1,
             cache_duration=100,
         )
+
         self.userbot2 = Client(
             name="AnonXAss2",
             api_id=config.API_ID,
@@ -70,6 +67,7 @@ class Call(PyTgCalls):
             self.userbot2,
             cache_duration=100,
         )
+
         self.userbot3 = Client(
             name="AnonXAss3",
             api_id=config.API_ID,
@@ -80,6 +78,7 @@ class Call(PyTgCalls):
             self.userbot3,
             cache_duration=100,
         )
+
         self.userbot4 = Client(
             name="AnonXAss4",
             api_id=config.API_ID,
@@ -90,6 +89,7 @@ class Call(PyTgCalls):
             self.userbot4,
             cache_duration=100,
         )
+
         self.userbot5 = Client(
             name="AnonXAss5",
             api_id=config.API_ID,
@@ -165,6 +165,7 @@ class Call(PyTgCalls):
                     vs = 0.68
                 if str(speed) == str("2.0"):
                     vs = 0.5
+
                 proc = await asyncio.create_subprocess_shell(
                     cmd=(
                         "ffmpeg "
@@ -179,15 +180,18 @@ class Call(PyTgCalls):
                     stdin=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
+
                 await proc.communicate()
             else:
                 pass
         else:
             out = file_path
+
         dur = await asyncio.get_event_loop().run_in_executor(None, check_duration, out)
         dur = int(dur)
         played, con_seconds = speed_converter(playing[0]["played"], speed)
         duration = seconds_to_min(dur)
+
         stream = (
             AudioVideoPiped(
                 out,
@@ -202,15 +206,18 @@ class Call(PyTgCalls):
                 additional_ffmpeg_parameters=f"-ss {played} -to {duration}",
             )
         )
+
         if str(db[chat_id][0]["file"]) == str(file_path):
             await assistant.change_stream(chat_id, stream)
         else:
             raise AssistantErr("Umm")
+
         if str(db[chat_id][0]["file"]) == str(file_path):
             exis = (playing[0]).get("old_dur")
             if not exis:
                 db[chat_id][0]["old_dur"] = db[chat_id][0]["dur"]
                 db[chat_id][0]["old_second"] = db[chat_id][0]["seconds"]
+
             db[chat_id][0]["played"] = con_seconds
             db[chat_id][0]["dur"] = duration
             db[chat_id][0]["seconds"] = dur
@@ -353,7 +360,19 @@ class Call(PyTgCalls):
             queued = check[0]["file"]
             language = await get_lang(chat_id)
             _ = get_string(language)
-            title = (check[0]["title"]).title()
+            # Enhanced title handling with Apple Music metadata
+            raw_title = check[0]["title"]
+            title = raw_title.title()
+            # Check if this track has Apple Music metadata stored
+            apple_metadata = check[0].get("apple_metadata", {})
+            if apple_metadata:
+                apple_title = apple_metadata.get("apple_title", "")
+                apple_artist = apple_metadata.get("apple_artist", "")
+                # Use Apple Music title if available
+                if apple_title:
+                    title = apple_title
+                    if apple_artist:
+                        title = f"{apple_title} - {apple_artist}"
             user = check[0]["by"]
             original_chat_id = check[0]["chat_id"]
             streamtype = check[0]["streamtype"]
@@ -391,17 +410,35 @@ class Call(PyTgCalls):
                         original_chat_id,
                         text=_["call_6"],
                     )
-                img = await get_thumb(videoid)
+                # Use Apple Music artwork if available
+                if apple_metadata and apple_metadata.get("apple_artwork"):
+                    img = apple_metadata["apple_artwork"]
+                else:
+                    img = await get_thumb(videoid)
                 button = stream_markup(_, chat_id)
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
-                    caption=_["stream_1"].format(
+                # Enhanced caption for Apple Music tracks
+                if apple_metadata and apple_metadata.get("apple_title"):
+                    caption = _["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{videoid}",
+                        apple_metadata["apple_title"][:23],
+                        check[0]["dur"],
+                        user,
+                    )
+                    if apple_metadata.get("apple_artist"):
+                        caption += f"\n🎵 **Artist:** {apple_metadata['apple_artist']}"
+                    if apple_metadata.get("apple_album"):
+                        caption += f"\n💿 **Album:** {apple_metadata['apple_album']}"
+                else:
+                    caption = _["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{videoid}",
                         title[:23],
                         check[0]["dur"],
                         user,
-                    ),
+                    )
+                run = await app.send_photo(
+                    chat_id=original_chat_id,
+                    photo=img,
+                    caption=caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
                 db[chat_id][0]["mystic"] = run
@@ -437,18 +474,36 @@ class Call(PyTgCalls):
                         original_chat_id,
                         text=_["call_6"],
                     )
-                img = await get_thumb(videoid)
+                # Use Apple Music artwork if available
+                if apple_metadata and apple_metadata.get("apple_artwork"):
+                    img = apple_metadata["apple_artwork"]
+                else:
+                    img = await get_thumb(videoid)
                 button = stream_markup(_, chat_id)
                 await mystic.delete()
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
-                    caption=_["stream_1"].format(
+                # Enhanced caption for Apple Music tracks
+                if apple_metadata and apple_metadata.get("apple_title"):
+                    caption = _["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{videoid}",
+                        apple_metadata["apple_title"][:23],
+                        check[0]["dur"],
+                        user,
+                    )
+                    if apple_metadata.get("apple_artist"):
+                        caption += f"\n🎵 **Artist:** {apple_metadata['apple_artist']}"
+                    if apple_metadata.get("apple_album"):
+                        caption += f"\n💿 **Album:** {apple_metadata['apple_album']}"
+                else:
+                    caption = _["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{videoid}",
                         title[:23],
                         check[0]["dur"],
                         user,
-                    ),
+                    )
+                run = await app.send_photo(
+                    chat_id=original_chat_id,
+                    photo=img,
+                    caption=caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
                 db[chat_id][0]["mystic"] = run
@@ -525,17 +580,35 @@ class Call(PyTgCalls):
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 else:
-                    img = await get_thumb(videoid)
+                    # Use Apple Music artwork if available
+                    if apple_metadata and apple_metadata.get("apple_artwork"):
+                        img = apple_metadata["apple_artwork"]
+                    else:
+                        img = await get_thumb(videoid)
                     button = stream_markup(_, chat_id)
-                    run = await app.send_photo(
-                        chat_id=original_chat_id,
-                        photo=img,
-                        caption=_["stream_1"].format(
+                    # Enhanced caption for Apple Music tracks
+                    if apple_metadata and apple_metadata.get("apple_title"):
+                        caption = _["stream_1"].format(
+                            f"https://t.me/{app.username}?start=info_{videoid}",
+                            apple_metadata["apple_title"][:23],
+                            check[0]["dur"],
+                            user,
+                        )
+                        if apple_metadata.get("apple_artist"):
+                            caption += f"\n🎵 **Artist:** {apple_metadata['apple_artist']}"
+                        if apple_metadata.get("apple_album"):
+                            caption += f"\n💿 **Album:** {apple_metadata['apple_album']}"
+                    else:
+                        caption = _["stream_1"].format(
                             f"https://t.me/{app.username}?start=info_{videoid}",
                             title[:23],
                             check[0]["dur"],
                             user,
-                        ),
+                        )
+                    run = await app.send_photo(
+                        chat_id=original_chat_id,
+                        photo=img,
+                        caption=caption,
                         reply_markup=InlineKeyboardMarkup(button),
                     )
                     db[chat_id][0]["mystic"] = run
@@ -596,6 +669,5 @@ class Call(PyTgCalls):
             if not isinstance(update, StreamAudioEnded):
                 return
             await self.change_stream(client, update.chat_id)
-
 
 Anony = Call()
