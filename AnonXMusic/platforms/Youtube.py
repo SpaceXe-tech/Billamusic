@@ -354,12 +354,11 @@ class YouTubeAPI:
                 "format": "bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
-                "geo_bypass_country": "IN",  
+                "geo_bypass_country": "ID",  
                 "nocheckcertificate": True,
                 "quiet": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "no_warnings": True,
-                "proxy": "http://xvmVxJ9Nut:nHBRLZxJkq@172.233.178.205:10014",
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
