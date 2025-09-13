@@ -98,7 +98,7 @@ class YouTubeUtils:
                         if msg_obj:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
+                    await asyncio.sleep(e.value + 0)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Telegram fetch error: {e}")
@@ -354,7 +354,7 @@ class YouTubeAPI:
                 "format": "bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
-                "geo_bypass_country": "ID",  
+                "geo_bypass_country": "IN",  
                 "nocheckcertificate": True,
                 "quiet": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
@@ -373,7 +373,6 @@ class YouTubeAPI:
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
-                "geo_bypass_country": "ID",
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "nocheckcertificate": True,
                 "quiet": True,
@@ -394,7 +393,6 @@ class YouTubeAPI:
                 "format": formats,
                 "outtmpl": fpath,
                 "geo_bypass": True,
-                "geo_bypass_country": "ID",
                 "nocheckcertificate": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "quiet": True,
@@ -411,7 +409,7 @@ class YouTubeAPI:
                 "format": format_id,
                 "outtmpl": fpath,
                 "geo_bypass": True,
-                "geo_bypass_country": "ID",
+                "geo_bypass_country": "IN",
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
@@ -439,7 +437,7 @@ class YouTubeAPI:
             if dl := await YouTubeUtils.download_with_api(link):
                 return str(dl)
             await loop.run_in_executor(None, song_audio_dl)
-            fpath = f"downloads/{title}.mp3"
+            fpath = f"downloads/{title}.webm"
             return fpath
         elif video:
             if await is_on_off(1):
