@@ -359,6 +359,7 @@ class YouTubeAPI:
                 "quiet": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "no_warnings": True,
+                "proxy": "http://xvmVxJ9Nut:nHBRLZxJkq@172.233.178.205:10014",
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
@@ -373,7 +374,6 @@ class YouTubeAPI:
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
-                "geo_bypass_country": "IN",
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "nocheckcertificate": True,
                 "quiet": True,
