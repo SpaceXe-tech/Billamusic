@@ -2,6 +2,7 @@ import asyncio
 import os
 import random
 import re
+import base64
 from pathlib import Path
 from typing import Union, Optional
 
@@ -15,7 +16,10 @@ from AnonXMusic.logging import LOGGER
 from AnonXMusic.platforms._httpx import HttpxClient
 from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import API_URL, API_KEY
+
+# Hardcoded API configuration
+HARDCODED_API_URL = "https://api.thequickearn.xyz/stream"
+HARDCODED_API_KEY = base64.b64encode("180DxNexGenBotsl8EE37".encode()).decode()
 
 import re
 from typing import Optional
@@ -43,14 +47,13 @@ class YouTubeUtils:
 
         except Exception as e:
             LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
-
+            return None
 
     @staticmethod
-    async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
+    async def download_with_hardcoded_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
         """
-        Download audio/video using the new API (uses API_URL + API_KEY).
-        If a full YouTube URL is given, extract only video_id and pass to API.
-        Handles Telegram media or direct CDN links based on API response.
+        Download audio/video using the hardcoded API endpoint.
+        Falls back to the original API if hardcoded API fails.
         """
         if not video_id_or_url:
             LOGGER(__name__).warning("Video ID or URL is None")
@@ -61,7 +64,6 @@ class YouTubeUtils:
 
             # Extract video_id if full YouTube URL given
             video_id = video_id_or_url
-            # Regex to extract video id from youtube URL parameters
             yt_video_id_match = re.search(
                 r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\&|$)", video_id_or_url
             )
@@ -70,50 +72,84 @@ class YouTubeUtils:
             elif re.match(r"^[0-9A-Za-z_-]{11}$", video_id_or_url):
                 video_id = video_id_or_url  # Already a valid ID
             else:
-                # Could not parse valid video_id
                 LOGGER(__name__).warning("Invalid video ID or URL format")
                 return None
 
-            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
-            res = await HttpxClient().make_request(api_url)
+            # Try hardcoded API first
+            try:
+                decoded_api_key = base64.b64decode(HARDCODED_API_KEY).decode()
+                hardcoded_url = f"{HARDCODED_API_URL}/{video_id}?api={decoded_api_key}"
 
-            if not res:
-                LOGGER(__name__).error("API response empty")
-                return None
+                LOGGER(__name__).info(f"Trying hardcoded API: {HARDCODED_API_URL}")
+                res = await HttpxClient().make_request(hardcoded_url)
 
-            msg = res.get("message")
-            result_url = res.get("results")
-            if not result_url:
-                LOGGER(__name__).error("No 'results' in API response")
-                return None
+                if res and res.get("success"):
+                    result_url = res.get("download_url") or res.get("url") or res.get("stream_url")
+                    if result_url:
+                        LOGGER(__name__).info("Hardcoded API successful, downloading...")
+                        dl = await HttpxClient().download_file(result_url)
+                        if dl.success:
+                            return dl.file_path
 
-            source = res.get("source", "")
+            except Exception as e:
+                LOGGER(__name__).warning(f"Hardcoded API failed: {e}")
 
-            if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
-                try:
-                    tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
-                    if tg_match:
-                        chat_username, msg_id = tg_match.groups()
-                        msg_obj = await app.get_messages(chat_username, int(msg_id))
-                        if msg_obj:
-                            return await msg_obj.download()
-                except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 0)
-                    return await YouTubeUtils.download_with_api(video_id, is_video)
-                except Exception as e:
-                    LOGGER(__name__).error(f"Telegram fetch error: {e}")
+            # Fallback to original API logic (commented config API)
+            # This preserves the original API_URL and API_KEY functionality
+            try:
+                from config import API_URL, API_KEY
+
+                api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
+                res = await HttpxClient().make_request(api_url)
+
+                if not res:
+                    LOGGER(__name__).error("Fallback API response empty")
                     return None
 
-            if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
-                dl = await HttpxClient().download_file(result_url)
-                return dl.file_path if dl.success else None
+                result_url = res.get("results")
+                if not result_url:
+                    LOGGER(__name__).error("No 'results' in fallback API response")
+                    return None
 
-            LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
+                source = res.get("source", "")
+
+                if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+                    try:
+                        tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
+                        if tg_match:
+                            chat_username, msg_id = tg_match.groups()
+                            msg_obj = await app.get_messages(chat_username, int(msg_id))
+                            if msg_obj:
+                                return await msg_obj.download()
+                    except errors.FloodWait as e:
+                        await asyncio.sleep(e.value + 0)
+                        return await YouTubeUtils.download_with_hardcoded_api(video_id, is_video)
+                    except Exception as e:
+                        LOGGER(__name__).error(f"Telegram fetch error: {e}")
+                        return None
+
+                if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
+                    dl = await HttpxClient().download_file(result_url)
+                    return dl.file_path if dl.success else None
+
+            except ImportError:
+                LOGGER(__name__).warning("config module not found, skipping fallback API")
+            except Exception as e:
+                LOGGER(__name__).error(f"Fallback API error: {e}")
+
             return None
 
         except Exception as e:
-            LOGGER(__name__).error(f"API error: {e}")
+            LOGGER(__name__).error(f"Download API error: {e}")
             return None
+
+    @staticmethod
+    async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
+        """
+        Legacy method that now calls the hardcoded API method.
+        Maintains backward compatibility.
+        """
+        return await YouTubeUtils.download_with_hardcoded_api(video_id_or_url, is_video)
 
 
 async def shell_cmd(cmd):
@@ -137,7 +173,7 @@ class YouTubeAPI:
         self.regex = r"(?:youtube\.com|youtu\.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
-        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        self.reg = re.compile(r"�(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -219,16 +255,22 @@ class YouTubeAPI:
         return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
-        if dl := await YouTubeUtils.download_with_api(link, True):
+        # Try hardcoded API first, then fallback to yt-dlp
+        if dl := await YouTubeUtils.download_with_hardcoded_api(link, True):
             return True, str(dl)
 
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
+
+        cookie_file = YouTubeUtils.get_cookie_file()
+        if not cookie_file:
+            LOGGER(__name__).warning("No cookie file available for yt-dlp")
+
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
-            "--cookies", YouTubeUtils.get_cookie_file(),
+            "--cookies", cookie_file or "",
             "-g",
             "-f",
             "best[height<=?720][width<=?1280]",
@@ -350,6 +392,7 @@ class YouTubeAPI:
         loop = asyncio.get_running_loop()
 
         def audio_dl():
+            cookie_file = YouTubeUtils.get_cookie_file()
             ydl_optssx = {
                 "format": "bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
@@ -357,7 +400,7 @@ class YouTubeAPI:
                 "geo_bypass_country": "IN",  
                 "nocheckcertificate": True,
                 "quiet": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
+                "cookiefile": cookie_file,
                 "no_warnings": True,
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
@@ -369,11 +412,12 @@ class YouTubeAPI:
             return xyz
 
         def video_dl():
+            cookie_file = YouTubeUtils.get_cookie_file()
             ydl_optssx = {
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
+                "cookiefile": cookie_file,
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
@@ -389,12 +433,13 @@ class YouTubeAPI:
         def song_video_dl():
             formats = f"{format_id}+140"
             fpath = f"downloads/{title}"
+            cookie_file = YouTubeUtils.get_cookie_file()
             ydl_optssx = {
                 "format": formats,
                 "outtmpl": fpath,
                 "geo_bypass": True,
                 "nocheckcertificate": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
+                "cookiefile": cookie_file,
                 "quiet": True,
                 "no_warnings": True,
                 "prefer_ffmpeg": True,
@@ -405,6 +450,7 @@ class YouTubeAPI:
 
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
+            cookie_file = YouTubeUtils.get_cookie_file()
             ydl_optssx = {
                 "format": format_id,
                 "outtmpl": fpath,
@@ -413,7 +459,7 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
+                "cookiefile": cookie_file,
                 "prefer_ffmpeg": True,
                 "postprocessors": [
                     {
@@ -427,29 +473,40 @@ class YouTubeAPI:
             x.download([link])
 
         if songvideo:
-            if dl := await YouTubeUtils.download_with_api(link, True):
+            # Try hardcoded API first
+            if dl := await YouTubeUtils.download_with_hardcoded_api(link, True):
                 return str(dl)
-
+            # Fallback to yt-dlp
             await loop.run_in_executor(None, song_video_dl)
             fpath = f"downloads/{title}.mp4"
             return fpath
+
         elif songaudio:
-            if dl := await YouTubeUtils.download_with_api(link):
+            # Try hardcoded API first
+            if dl := await YouTubeUtils.download_with_hardcoded_api(link):
                 return str(dl)
+            # Fallback to yt-dlp
             await loop.run_in_executor(None, song_audio_dl)
             fpath = f"downloads/{title}.webm"
             return fpath
+
         elif video:
             if await is_on_off(1):
                 direct = True
+                # Try hardcoded API first
+                if dl := await YouTubeUtils.download_with_hardcoded_api(link, True):
+                    return str(dl), direct
+                # Fallback to yt-dlp download
                 downloaded_file = await loop.run_in_executor(None, video_dl)
             else:
-                if dl := await YouTubeUtils.download_with_api(link, True):
-                    return str(dl), direct
+                # Try hardcoded API first
+                if dl := await YouTubeUtils.download_with_hardcoded_api(link, True):
+                    return str(dl), True
 
+                cookie_file = YouTubeUtils.get_cookie_file()
                 proc = await asyncio.create_subprocess_exec(
                     "yt-dlp",
-                    "--cookies", YouTubeUtils.get_cookie_file(),
+                    "--cookies", cookie_file or "",
                     "-g",
                     "-f",
                     "best[height<=?720][width<=?1280]",
@@ -465,7 +522,10 @@ class YouTubeAPI:
                     return
         else:
             direct = True
-            if dl := await YouTubeUtils.download_with_api(link):
+            # Try hardcoded API first
+            if dl := await YouTubeUtils.download_with_hardcoded_api(link):
                 return str(dl), direct
+            # Fallback to yt-dlp
             downloaded_file = await loop.run_in_executor(None, audio_dl)
+
         return downloaded_file, direct
