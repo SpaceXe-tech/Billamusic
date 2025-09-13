@@ -1,6 +1,7 @@
 
 import re
 import aiohttp
+import asyncio
 from typing import Union
 from bs4 import BeautifulSoup
 from youtubesearchpython.__future__ import VideosSearch
@@ -13,6 +14,11 @@ class AppleAPI:
         self.base = "https://music.apple.com/in/playlist/"
         self.itunes_api = "https://itunes.apple.com/lookup?id={}"
         self.itunes_search_api = "https://itunes.apple.com/search?term={}&media=music&entity=song&limit=1"
+
+        # Rate limiting semaphore for YouTube searches (1 request per 2 seconds)
+        self.youtube_semaphore = asyncio.Semaphore(1)
+        self.last_youtube_request = 0
+        self.youtube_delay = 2.0  # 2 seconds between requests
 
     async def valid(self, link: str):
         return bool(re.search(self.regex, link))
@@ -69,18 +75,41 @@ class AppleAPI:
             print(f"iTunes API Error: {str(e)}")
             return None
 
+    async def _youtube_search_with_rate_limit(self, query: str):
+        """
+        Search YouTube with rate limiting to prevent being throttled
+        """
+        async with self.youtube_semaphore:
+            # Calculate time since last request
+            current_time = asyncio.get_event_loop().time()
+            time_since_last = current_time - self.last_youtube_request
+
+            # If not enough time has passed, wait
+            if time_since_last < self.youtube_delay:
+                wait_time = self.youtube_delay - time_since_last
+                await asyncio.sleep(wait_time)
+
+            try:
+                results = VideosSearch(query, limit=1)
+                yt_results = await results.next()
+
+                # Update last request time
+                self.last_youtube_request = asyncio.get_event_loop().time()
+
+                if not yt_results.get("result"):
+                    return None
+                return yt_results["result"][0]
+            except Exception as e:
+                print(f"YouTube search error: {str(e)}")
+                # Update last request time even on error
+                self.last_youtube_request = asyncio.get_event_loop().time()
+                return None
+
     async def _youtube_search(self, query: str):
         """
-        Search YouTube for the given query
+        Search YouTube for the given query (now with rate limiting)
         """
-        try:
-            results = VideosSearch(query, limit=1)
-            yt_results = await results.next()
-            if not yt_results.get("result"):
-                return None
-            return yt_results["result"][0]
-        except Exception:
-            return None
+        return await self._youtube_search_with_rate_limit(query)
 
     def _calculate_duration_min(self, duration_ms: int):
         """
@@ -126,7 +155,7 @@ class AppleAPI:
         # Create search query for YouTube
         search_query = f"{track_name} {artist_name}".strip()
 
-        # Search YouTube for the track
+        # Search YouTube for the track (with rate limiting)
         yt_data = await self._youtube_search(search_query)
         if not yt_data:
             return False
@@ -211,7 +240,7 @@ class AppleAPI:
                     # Create search query for YouTube
                     search_query = f"{track_name} {artist_name}".strip()
 
-                    # Search YouTube for the track
+                    # Search YouTube for the track (with rate limiting)
                     yt_data = await self._youtube_search(search_query)
                     if not yt_data:
                         continue
@@ -289,7 +318,7 @@ class AppleAPI:
                     # Create search query for YouTube
                     search_query = f"{track_name} {artist_name}".strip()
 
-                    # Search YouTube for the track
+                    # Search YouTube for the track (with rate limiting)
                     yt_data = await self._youtube_search(search_query)
                     if not yt_data:
                         continue
