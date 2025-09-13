@@ -8,7 +8,8 @@ from youtubesearchpython.__future__ import VideosSearch
 
 class AppleAPI:
     def __init__(self):
-        self.regex = r"^(https:\/\/music\.apple\.com\/)(.*)$"
+        # Match normal + embed Apple Music URLs (album, playlist, song)
+        self.regex = r"^(https:\/\/(?:embed\.)?music\.apple\.com\/(?:[a-z]{2}\/)?(?:album|playlist|song)\/[^\s\/]+\/(\d+))"
         self.base = "https://music.apple.com/in/playlist/"
         self.itunes_api = "https://itunes.apple.com/lookup?id={}"
         self.itunes_search_api = "https://itunes.apple.com/search?term={}&media=music&entity=song&limit=1"
