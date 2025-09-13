@@ -1,21 +1,17 @@
-
 import os
 from random import randint
 from typing import Union
-
 from pyrogram.types import InlineKeyboardMarkup
-
 import config
 from AnonXMusic import Carbon, YouTube, app
 from AnonXMusic.core.call import Anony
 from AnonXMusic.misc import db
 from AnonXMusic.utils.database import add_active_video_chat, is_active_chat
 from AnonXMusic.utils.exceptions import AssistantErr
-from AnonXMusic.utils.inline import aq_markup, close_markup, stream_markup
+from AnonXMusic.utils.inline import stream_markup, close_markup
 from AnonXMusic.utils.pastebin import AnonyBin
 from AnonXMusic.utils.stream.queue import put_queue, put_queue_index
 from AnonXMusic.utils.thumbnails import get_thumb
-
 
 async def stream(
     _,
@@ -35,7 +31,7 @@ async def stream(
     if forceplay:
         await Anony.force_stop_stream(chat_id)
 
-    # Handle playlist streaming (YouTube, Spotify, Apple Music)
+    # EXACTLY OLD : Keep original playlist handling BUT add NEW Apple Music support
     if streamtype == "playlist":
         msg = f"{_['play_19']}\n\n"
         count = 0
@@ -43,15 +39,14 @@ async def stream(
             if int(count) == config.PLAYLIST_FETCH_LIMIT:
                 continue
             try:
-                # Handle Apple Music playlist items
+                # NEW: Enhanced Apple Music playlist items handling from current version
                 if isinstance(search, dict) and "vidid" in search:
                     # Apple Music or other pre-processed items
                     title = search.get("apple_title") or search.get("title", "Unknown")
                     duration_min = search.get("duration_min", "00:00")
                     thumbnail = search.get("apple_artwork") or search.get("thumb")
                     vidid = search.get("vidid")
-
-                    # Convert duration to seconds for limit check
+                    # Convert duration to seconds for apple api limit check
                     try:
                         if ":" in str(duration_min):
                             time_parts = duration_min.split(":")
@@ -61,7 +56,6 @@ async def stream(
                     except:
                         duration_sec = 0
                 else:
-                    # Standard YouTube playlist items
                     (
                         title,
                         duration_min,
@@ -71,7 +65,6 @@ async def stream(
                     ) = await YouTube.details(search, False if spotify else True)
             except:
                 continue
-
             if str(duration_min) == "None":
                 continue
             if duration_sec > config.DURATION_LIMIT:
@@ -156,12 +149,12 @@ async def stream(
                 reply_markup=upl,
             )
 
-    # Handle YouTube streaming
+    # old : Keep original YouTube logic BUT add NEW Apple Music enhancements
     elif streamtype == "youtube":
         link = result["link"]
         vidid = result["vidid"]
 
-        # Use Apple Music metadata if available, otherwise use YouTube metadata
+        # NEW: Enhanced Apple Music metadata handling from current version
         if "apple_title" in result:
             title = result["apple_title"]
             apple_artist = result.get("apple_artist", "")
@@ -171,16 +164,15 @@ async def stream(
             title = (result["title"]).title()
 
         duration_min = result["duration_min"]
+        # NEW: Enhanced thumbnail selection for Apple Music
         thumbnail = result.get("apple_artwork") or result["thumb"]
         status = True if video else None
-
         try:
             file_path, direct = await YouTube.download(
                 vidid, mystic, videoid=True, video=status
             )
         except:
             raise AssistantErr(_["play_14"])
-
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -194,11 +186,9 @@ async def stream(
                 "video" if video else "audio",
             )
             position = len(db.get(chat_id)) - 1
-            button = aq_markup(_, chat_id)
             await app.send_message(
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
             )
         else:
             if not forceplay:
@@ -225,7 +215,7 @@ async def stream(
             img = await get_thumb(vidid)
             button = stream_markup(_, chat_id)
 
-            # Enhanced caption for Apple Music tracks
+            # NEW: Enhanced caption for Apple Music tracks from current version
             if "apple_title" in result:
                 caption_title = result["apple_title"][:23]
                 apple_info = ""
@@ -233,7 +223,6 @@ async def stream(
                     apple_info = f"\n🎵 Artist: {result['apple_artist']}"
                 if result.get("apple_album"):
                     apple_info += f"\n📀 Album: {result['apple_album']}"
-
                 caption = _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{vidid}",
                     caption_title,
@@ -257,12 +246,10 @@ async def stream(
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
 
-    # Handle SoundCloud streaming
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
         title = result["title"]
         duration_min = result["duration_min"]
-
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -276,11 +263,9 @@ async def stream(
                 "audio",
             )
             position = len(db.get(chat_id)) - 1
-            button = aq_markup(_, chat_id)
             await app.send_message(
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
             )
         else:
             if not forceplay:
@@ -310,14 +295,12 @@ async def stream(
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
 
-    # Handle Telegram file streaming
     elif streamtype == "telegram":
         file_path = result["path"]
         link = result["link"]
         title = (result["title"]).title()
         duration_min = result["dur"]
         status = True if video else None
-
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -331,11 +314,9 @@ async def stream(
                 "video" if video else "audio",
             )
             position = len(db.get(chat_id)) - 1
-            button = aq_markup(_, chat_id)
             await app.send_message(
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
             )
         else:
             if not forceplay:
@@ -365,7 +346,6 @@ async def stream(
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
 
-    # Handle live streaming
     elif streamtype == "live":
         link = result["link"]
         vidid = result["vidid"]
@@ -373,7 +353,6 @@ async def stream(
         thumbnail = result["thumb"]
         duration_min = "Live Track"
         status = True if video else None
-
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -387,11 +366,9 @@ async def stream(
                 "video" if video else "audio",
             )
             position = len(db.get(chat_id)) - 1
-            button = aq_markup(_, chat_id)
             await app.send_message(
                 chat_id=original_chat_id,
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
             )
         else:
             if not forceplay:
@@ -434,12 +411,10 @@ async def stream(
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
 
-    # Handle index/M3U8 streaming
     elif streamtype == "index":
-        link = result
-        title = "index link"
+        link = result  
+        title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
         duration_min = "00:00"
-
         if await is_active_chat(chat_id):
             await put_queue_index(
                 chat_id,
@@ -452,10 +427,9 @@ async def stream(
                 "video" if video else "audio",
             )
             position = len(db.get(chat_id)) - 1
-            button = aq_markup(_, chat_id)
+            # EXACTLY OLD: Simple edit without buttons
             await mystic.edit_text(
                 text=_["queue_4"].format(position, title[:27], duration_min, user_name),
-                reply_markup=InlineKeyboardMarkup(button),
             )
         else:
             if not forceplay:
