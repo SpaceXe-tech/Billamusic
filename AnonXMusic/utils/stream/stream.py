@@ -1,3 +1,4 @@
+
 import os
 from random import randint
 from typing import Union
@@ -33,6 +34,8 @@ async def stream(
         return
     if forceplay:
         await Anony.force_stop_stream(chat_id)
+
+    # Handle playlist streaming (YouTube, Spotify, Apple Music)
     if streamtype == "playlist":
         msg = f"{_['play_19']}\n\n"
         count = 0
@@ -40,19 +43,40 @@ async def stream(
             if int(count) == config.PLAYLIST_FETCH_LIMIT:
                 continue
             try:
-                (
-                    title,
-                    duration_min,
-                    duration_sec,
-                    thumbnail,
-                    vidid,
-                ) = await YouTube.details(search, False if spotify else True)
+                # Handle Apple Music playlist items
+                if isinstance(search, dict) and "vidid" in search:
+                    # Apple Music or other pre-processed items
+                    title = search.get("apple_title") or search.get("title", "Unknown")
+                    duration_min = search.get("duration_min", "00:00")
+                    thumbnail = search.get("apple_artwork") or search.get("thumb")
+                    vidid = search.get("vidid")
+
+                    # Convert duration to seconds for limit check
+                    try:
+                        if ":" in str(duration_min):
+                            time_parts = duration_min.split(":")
+                            duration_sec = int(time_parts[0]) * 60 + int(time_parts[1])
+                        else:
+                            duration_sec = 0
+                    except:
+                        duration_sec = 0
+                else:
+                    # Standard YouTube playlist items
+                    (
+                        title,
+                        duration_min,
+                        duration_sec,
+                        thumbnail,
+                        vidid,
+                    ) = await YouTube.details(search, False if spotify else True)
             except:
                 continue
+
             if str(duration_min) == "None":
                 continue
             if duration_sec > config.DURATION_LIMIT:
                 continue
+
             if await is_active_chat(chat_id):
                 await put_queue(
                     chat_id,
@@ -113,6 +137,7 @@ async def stream(
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
+
         if count == 0:
             return
         else:
@@ -130,19 +155,32 @@ async def stream(
                 caption=_["play_21"].format(position, link),
                 reply_markup=upl,
             )
+
+    # Handle YouTube streaming
     elif streamtype == "youtube":
         link = result["link"]
         vidid = result["vidid"]
-        title = (result["title"]).title()
+
+        # Use Apple Music metadata if available, otherwise use YouTube metadata
+        if "apple_title" in result:
+            title = result["apple_title"]
+            apple_artist = result.get("apple_artist", "")
+            if apple_artist:
+                title = f"{title} - {apple_artist}"
+        else:
+            title = (result["title"]).title()
+
         duration_min = result["duration_min"]
-        thumbnail = result["thumb"]
+        thumbnail = result.get("apple_artwork") or result["thumb"]
         status = True if video else None
+
         try:
             file_path, direct = await YouTube.download(
                 vidid, mystic, videoid=True, video=status
             )
         except:
             raise AssistantErr(_["play_14"])
+
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -186,23 +224,45 @@ async def stream(
             )
             img = await get_thumb(vidid)
             button = stream_markup(_, chat_id)
-            run = await app.send_photo(
-                original_chat_id,
-                photo=img,
-                caption=_["stream_1"].format(
+
+            # Enhanced caption for Apple Music tracks
+            if "apple_title" in result:
+                caption_title = result["apple_title"][:23]
+                apple_info = ""
+                if result.get("apple_artist"):
+                    apple_info = f"\nðŸŽµ **Artist:** {result['apple_artist']}"
+                if result.get("apple_album"):
+                    apple_info += f"\nðŸ’¿ **Album:** {result['apple_album']}"
+
+                caption = _["stream_1"].format(
+                    f"https://t.me/{app.username}?start=info_{vidid}",
+                    caption_title,
+                    duration_min,
+                    user_name,
+                ) + apple_info
+            else:
+                caption = _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{vidid}",
                     title[:23],
                     duration_min,
                     user_name,
-                ),
+                )
+
+            run = await app.send_photo(
+                original_chat_id,
+                photo=img,
+                caption=caption,
                 reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
+
+    # Handle SoundCloud streaming
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
         title = result["title"]
         duration_min = result["duration_min"]
+
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -249,12 +309,15 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # Handle Telegram file streaming
     elif streamtype == "telegram":
         file_path = result["path"]
         link = result["link"]
         title = (result["title"]).title()
         duration_min = result["dur"]
         status = True if video else None
+
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -301,6 +364,8 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # Handle live streaming
     elif streamtype == "live":
         link = result["link"]
         vidid = result["vidid"]
@@ -308,6 +373,7 @@ async def stream(
         thumbnail = result["thumb"]
         duration_min = "Live Track"
         status = True if video else None
+
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -367,10 +433,13 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
+    # Handle index/M3U8 streaming
     elif streamtype == "index":
         link = result
-        title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
+        title = "index link"
         duration_min = "00:00"
+
         if await is_active_chat(chat_id):
             await put_queue_index(
                 chat_id,
