@@ -98,7 +98,7 @@ class YouTubeUtils:
                         if msg_obj:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 0)
+                    await asyncio.sleep(e.value + 1)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Telegram fetch error: {e}")
@@ -176,7 +176,7 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        results = VideosSearch(link, limit=1)
+        results = VideosSearch(link, limit=2)
         for result in (await results.next())["result"]:
             title = result["title"]
             duration_min = result["duration"]
@@ -326,7 +326,7 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        a = VideosSearch(link, limit=10)
+        a = VideosSearch(link, limit=5)
         result = (await a.next()).get("result")
         title = result[query_type]["title"]
         duration_min = result[query_type]["duration"]
@@ -373,6 +373,7 @@ class YouTubeAPI:
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
+                "geo_bypass_country": "ID",
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "nocheckcertificate": True,
                 "quiet": True,
@@ -393,6 +394,7 @@ class YouTubeAPI:
                 "format": formats,
                 "outtmpl": fpath,
                 "geo_bypass": True,
+                "geo_bypass_country": "ID",
                 "nocheckcertificate": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "quiet": True,
@@ -409,6 +411,7 @@ class YouTubeAPI:
                 "format": format_id,
                 "outtmpl": fpath,
                 "geo_bypass": True,
+                "geo_bypass_country": "ID",
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
