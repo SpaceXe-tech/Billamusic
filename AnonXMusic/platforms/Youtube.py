@@ -1,71 +1,120 @@
 import asyncio
 import os
+import random
 import re
-import json
-from typing import Union
+from pathlib import Path
+from typing import Union, Optional
 
 import yt_dlp
+from pyrogram import errors
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
 
+from AnonXMusic.logging import LOGGER
+from AnonXMusic.platforms._httpx import HttpxClient
 from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
+from config import API_URL, API_KEY
+
+import re
+from typing import Optional
+from pathlib import Path
+
+class YouTubeUtils:
+    @staticmethod
+    def get_cookie_file() -> Optional[str]:
+        """Get a random cookie file from the 'cookies' directory, skipping 'cookie_time.txt'."""
+        cookie_dir = "AnonXMusic/assets"
+        try:
+            if not os.path.exists(cookie_dir):
+                LOGGER(__name__).warning("Cookie directory '%s' does not exist.", cookie_dir)
+                return None
+
+            files = os.listdir(cookie_dir)
+            cookies_files = [f for f in files if f.endswith(".txt") and f != "cookie_time.txt"]
+
+            if not cookies_files:
+                LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
+                return None
+
+            random_file = random.choice(cookies_files)
+            return os.path.join(cookie_dir, random_file)
+
+        except Exception as e:
+            LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
 
 
-
-import os
-import glob
-import random
-import logging
-
-def cookie_txt_file():
-    folder_path = f"{os.getcwd()}/AnonXMusic/assets"
-    filename = f"{os.getcwd()}/AnonXMusic/assets/logs.csv"
-    txt_files = glob.glob(os.path.join(folder_path, '*.txt'))
-    if not txt_files:
-        raise FileNotFoundError("No .txt files found in the specified folder.")
-    cookie_txt_file = random.choice(txt_files)
-    with open(filename, 'a') as file:
-        file.write(f'Choosen File : {cookie_txt_file}\n')
-    return f"""AnonXMusic/assets/{str(cookie_txt_file).split("/")[-1]}"""
-
-
-
-async def check_file_size(link):
-    async def get_format_info(link):
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp",
-            "--cookies", cookie_txt_file(),
-            "-J",
-            link,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            print(f'Error:\n{stderr.decode()}')
+    @staticmethod
+    async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
+        """
+        Download audio/video using the new API (uses API_URL + API_KEY).
+        If a full YouTube URL is given, extract only video_id and pass to API.
+        Handles Telegram media or direct CDN links based on API response.
+        """
+        if not video_id_or_url:
+            LOGGER(__name__).warning("Video ID or URL is None")
             return None
-        return json.loads(stdout.decode())
 
-    def parse_size(formats):
-        total_size = 0
-        for format in formats:
-            if 'filesize' in format:
-                total_size += format['filesize']
-        return total_size
+        try:
+            from AnonXMusic import app  # Local import inside function
 
-    info = await get_format_info(link)
-    if info is None:
-        return None
-    
-    formats = info.get('formats', [])
-    if not formats:
-        print("No formats found.")
-        return None
-    
-    total_size = parse_size(formats)
-    return total_size
+            # Extract video_id if full YouTube URL given
+            video_id = video_id_or_url
+            # Regex to extract video id from youtube URL parameters
+            yt_video_id_match = re.search(
+                r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\&|$)", video_id_or_url
+            )
+            if yt_video_id_match:
+                video_id = yt_video_id_match.group(1)
+            elif re.match(r"^[0-9A-Za-z_-]{11}$", video_id_or_url):
+                video_id = video_id_or_url  # Already a valid ID
+            else:
+                # Could not parse valid video_id
+                LOGGER(__name__).warning("Invalid video ID or URL format")
+                return None
+
+            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
+            res = await HttpxClient().make_request(api_url)
+
+            if not res:
+                LOGGER(__name__).error("API response empty")
+                return None
+
+            msg = res.get("message")
+            result_url = res.get("results")
+            if not result_url:
+                LOGGER(__name__).error("No 'results' in API response")
+                return None
+
+            source = res.get("source", "")
+
+            if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+                try:
+                    tg_match = re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url)
+                    if tg_match:
+                        chat_username, msg_id = tg_match.groups()
+                        msg_obj = await app.get_messages(chat_username, int(msg_id))
+                        if msg_obj:
+                            return await msg_obj.download()
+                except errors.FloodWait as e:
+                    await asyncio.sleep(e.value + 0)
+                    return await YouTubeUtils.download_with_api(video_id, is_video)
+                except Exception as e:
+                    LOGGER(__name__).error(f"Telegram fetch error: {e}")
+                    return None
+
+            if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
+                dl = await HttpxClient().download_file(result_url)
+                return dl.file_path if dl.success else None
+
+            LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
+            return None
+
+        except Exception as e:
+            LOGGER(__name__).error(f"API error: {e}")
+            return None
+
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -170,13 +219,16 @@ class YouTubeAPI:
         return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
+        if dl := await YouTubeUtils.download_with_api(link, True):
+            return True, str(dl)
+
         if videoid:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
-            "--cookies",cookie_txt_file(),
+            "--cookies", YouTubeUtils.get_cookie_file(),
             "-g",
             "-f",
             "best[height<=?720][width<=?1280]",
@@ -196,7 +248,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
         playlist = await shell_cmd(
-            f"yt-dlp -i --get-id --flat-playlist --cookies {cookie_txt_file()} --playlist-end {limit} --skip-download {link}"
+            f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         try:
             result = playlist.split("\n")
@@ -233,7 +285,7 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        ytdl_opts = {"quiet": True, "cookiefile" : cookie_txt_file()}
+        ytdl_opts = {"quiet": True}
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
             formats_available = []
@@ -296,6 +348,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         loop = asyncio.get_running_loop()
+
         def audio_dl():
             ydl_optssx = {
                 "format": "bestaudio/best",
@@ -303,7 +356,7 @@ class YouTubeAPI:
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
-                "cookiefile" : cookie_txt_file(),
+                "cookiefile": YouTubeUtils.get_cookie_file(),
                 "no_warnings": True,
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
@@ -319,9 +372,9 @@ class YouTubeAPI:
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
+                "cookiefile": YouTubeUtils.get_cookie_file(),
                 "nocheckcertificate": True,
                 "quiet": True,
-                "cookiefile" : cookie_txt_file(),
                 "no_warnings": True,
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
@@ -340,9 +393,9 @@ class YouTubeAPI:
                 "outtmpl": fpath,
                 "geo_bypass": True,
                 "nocheckcertificate": True,
+                "cookiefile": YouTubeUtils.get_cookie_file(),
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile" : cookie_txt_file(),
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
             }
@@ -358,7 +411,7 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile" : cookie_txt_file(),
+                "cookiefile": YouTubeUtils.get_cookie_file(),
                 "prefer_ffmpeg": True,
                 "postprocessors": [
                     {
@@ -372,10 +425,15 @@ class YouTubeAPI:
             x.download([link])
 
         if songvideo:
+            if dl := await YouTubeUtils.download_with_api(link, True):
+                return str(dl)
+
             await loop.run_in_executor(None, song_video_dl)
             fpath = f"downloads/{title}.mp4"
             return fpath
         elif songaudio:
+            if dl := await YouTubeUtils.download_with_api(link):
+                return str(dl)
             await loop.run_in_executor(None, song_audio_dl)
             fpath = f"downloads/{title}.mp3"
             return fpath
@@ -384,9 +442,12 @@ class YouTubeAPI:
                 direct = True
                 downloaded_file = await loop.run_in_executor(None, video_dl)
             else:
+                if dl := await YouTubeUtils.download_with_api(link, True):
+                    return str(dl), direct
+
                 proc = await asyncio.create_subprocess_exec(
                     "yt-dlp",
-                    "--cookies",cookie_txt_file(),
+                    "--cookies", YouTubeUtils.get_cookie_file(),
                     "-g",
                     "-f",
                     "best[height<=?720][width<=?1280]",
@@ -397,19 +458,12 @@ class YouTubeAPI:
                 stdout, stderr = await proc.communicate()
                 if stdout:
                     downloaded_file = stdout.decode().split("\n")[0]
-                    direct = False
+                    direct = None
                 else:
-                   file_size = await check_file_size(link)
-                   if not file_size:
-                     print("None file Size")
-                     return
-                   total_size_mb = file_size / (1024 * 1024)
-                   if total_size_mb > 250:
-                     print(f"File size {total_size_mb:.2f} MB exceeds the 250MB limit.")
-                     return None
-                   direct = True
-                   downloaded_file = await loop.run_in_executor(None, video_dl)
+                    return
         else:
             direct = True
+            if dl := await YouTubeUtils.download_with_api(link):
+                return str(dl), direct
             downloaded_file = await loop.run_in_executor(None, audio_dl)
         return downloaded_file, direct
