@@ -230,9 +230,9 @@ async def stream(
                 caption_title = result["apple_title"][:23]
                 apple_info = ""
                 if result.get("apple_artist"):
-                    apple_info = f"\nðŸŽµ **Artist:** {result['apple_artist']}"
+                    apple_info = f"\n🎵 Artist: {result['apple_artist']}"
                 if result.get("apple_album"):
-                    apple_info += f"\nðŸ’¿ **Album:** {result['apple_album']}"
+                    apple_info += f"\n📀 Album: {result['apple_album']}"
 
                 caption = _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{vidid}",
