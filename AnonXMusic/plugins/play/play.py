@@ -73,6 +73,8 @@ async def play_commnd(
         if message.reply_to_message
         else None
     )
+
+    # Handle Telegram audio files
     if audio_telegram:
         if audio_telegram.file_size > 104857600:
             return await mystic.edit_text(_["play_5"])
@@ -111,6 +113,8 @@ async def play_commnd(
                 return await mystic.edit_text(err)
             return await mystic.delete()
         return
+
+    # Handle Telegram video files
     elif video_telegram:
         if message.reply_to_message.document:
             try:
@@ -155,7 +159,10 @@ async def play_commnd(
                 return await mystic.edit_text(err)
             return await mystic.delete()
         return
+
+    # Handle URLs from various platforms
     elif url:
+        # YouTube URL handling
         if await YouTube.exists(url):
             if "playlist" in url:
                 try:
@@ -185,11 +192,13 @@ async def play_commnd(
                     details["title"],
                     details["duration_min"],
                 )
+
+        # Spotify URL handling
         elif await Spotify.valid(url):
             spotify = True
             if not config.SPOTIFY_CLIENT_ID and not config.SPOTIFY_CLIENT_SECRET:
                 return await mystic.edit_text(
-                    "» sᴘᴏᴛɪғʏ ɪs ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ ʏᴇᴛ.\n\nᴘʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ."
+                    "Spotify Streams Having Some issues with their servers please try again later."
                 )
             if "track" in url:
                 try:
@@ -228,27 +237,71 @@ async def play_commnd(
                 cap = _["play_11"].format(message.from_user.first_name)
             else:
                 return await mystic.edit_text(_["play_15"])
+
+        # Apple Music URL handling (Enhanced)
         elif await Apple.valid(url):
-            if "album" in url:
-                try:
+            try:
+                # Handle Apple Music tracks
+                if "/song/" in url or "?i=" in url:
                     details, track_id = await Apple.track(url)
-                except:
+                    if not details:
+                        return await mystic.edit_text(_["play_3"])
+                    streamtype = "youtube"
+                    img = details.get("apple_artwork") or details["thumb"]
+                    cap = _["play_10"].format(
+                        details["apple_title"] or details["title"],
+                        details["duration_min"]
+                    )
+
+                # Handle Apple Music albums
+                elif "/album/" in url:
+                    try:
+                        details, plist_id = await Apple.album(url)
+                        if not details:
+                            return await mystic.edit_text(_["play_3"])
+                    except:
+                        # Fallback to single track if album parsing fails
+                        try:
+                            details, track_id = await Apple.track(url)
+                            if not details:
+                                return await mystic.edit_text(_["play_3"])
+                            streamtype = "youtube"
+                            img = details.get("apple_artwork") or details["thumb"]
+                            cap = _["play_10"].format(
+                                details["apple_title"] or details["title"],
+                                details["duration_min"]
+                            )
+                        except:
+                            return await mystic.edit_text(_["play_3"])
+                    else:
+                        spotify = True
+                        streamtype = "playlist"
+                        plist_type = "apalbum"
+                        img = details[0].get("apple_artwork") if details else config.PLAYLIST_IMG_URL
+                        cap = _["play_12"].format(app.mention, message.from_user.mention)
+
+                # Handle Apple Music playlists
+                elif "/playlist/" in url:
+                    spotify = True
+                    try:
+                        details, plist_id = await Apple.playlist(url)
+                        if not details:
+                            return await mystic.edit_text(_["play_3"])
+                    except:
+                        return await mystic.edit_text(_["play_3"])
+                    streamtype = "playlist"
+                    plist_type = "apple"
+                    img = details[0].get("apple_artwork") if details else config.PLAYLIST_IMG_URL
+                    cap = _["play_12"].format(app.mention, message.from_user.mention)
+
+                else:
                     return await mystic.edit_text(_["play_3"])
-                streamtype = "youtube"
-                img = details["thumb"]
-                cap = _["play_10"].format(details["title"], details["duration_min"])
-            elif "playlist" in url:
-                spotify = True
-                try:
-                    details, plist_id = await Apple.playlist(url)
-                except:
-                    return await mystic.edit_text(_["play_3"])
-                streamtype = "playlist"
-                plist_type = "apple"
-                cap = _["play_12"].format(app.mention, message.from_user.mention)
-                img = url
-            else:
+
+            except Exception as e:
+                print(f"Apple Music Error: {str(e)}")
                 return await mystic.edit_text(_["play_3"])
+
+        # Resso URL handling
         elif await Resso.valid(url):
             try:
                 details, track_id = await Resso.track(url)
@@ -257,6 +310,8 @@ async def play_commnd(
             streamtype = "youtube"
             img = details["thumb"]
             cap = _["play_10"].format(details["title"], details["duration_min"])
+
+        # SoundCloud URL handling
         elif await SoundCloud.valid(url):
             try:
                 details, track_path = await SoundCloud.download(url)
@@ -287,6 +342,8 @@ async def play_commnd(
                 err = e if ex_type == "AssistantErr" else _["general_2"].format(ex_type)
                 return await mystic.edit_text(err)
             return await mystic.delete()
+
+        # Handle other streaming URLs (M3U8, direct links, etc.)
         else:
             try:
                 await Anony.stream_call(url)
@@ -317,6 +374,8 @@ async def play_commnd(
                 err = e if ex_type == "AssistantErr" else _["general_2"].format(ex_type)
                 return await mystic.edit_text(err)
             return await play_logs(message, streamtype="M3u8 or Index Link")
+
+    # Handle text search queries
     else:
         if len(message.command) < 2:
             buttons = botplaylist_markup(_)
@@ -333,6 +392,8 @@ async def play_commnd(
         except:
             return await mystic.edit_text(_["play_3"])
         streamtype = "youtube"
+
+    # Handle Direct playmode
     if str(playmode) == "Direct":
         if not plist_type:
             if details["duration_min"]:
@@ -374,6 +435,8 @@ async def play_commnd(
             return await mystic.edit_text(err)
         await mystic.delete()
         return await play_logs(message, streamtype=streamtype)
+
+    # Handle non-Direct playmode (with inline keyboards)
     else:
         if plist_type:
             ran_hash = "".join(
@@ -431,6 +494,17 @@ async def play_commnd(
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
                 return await play_logs(message, streamtype=f"URL Searched Inline")
+
+
+
+
+
+
+
+
+
+
+
 
 
 @app.on_callback_query(filters.regex("MusicStream") & ~BANNED_USERS)
@@ -662,4 +736,5 @@ async def slider_queries(client, CallbackQuery, _):
         return await CallbackQuery.edit_message_media(
             media=med, reply_markup=InlineKeyboardMarkup(buttons)
         )
+
 
