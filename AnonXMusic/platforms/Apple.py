@@ -16,7 +16,9 @@ class AppleAPI:
         return bool(re.search(self.regex, link))
 
     async def _itunes_lookup(self, track_id: str):
-        """Look up track info from iTunes API using track ID"""
+        """
+        Look up track info from iTunes API using track ID
+        """
         url = self.itunes_api.format(track_id)
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
@@ -25,7 +27,7 @@ class AppleAPI:
                 data = await resp.json()
                 if not data.get("results"):
                     return None
-                return data["results"][0]
+                return data["results"][0]  # first track
 
     async def track(self, url, playid: Union[bool, str] = None):
         if playid:
@@ -46,34 +48,33 @@ class AppleAPI:
         preview = itunes_data.get("previewUrl")
         artwork = itunes_data.get("artworkUrl100")
 
-        query = f"{track_name} {artist_name}" if track_name else None
+        if not track_name:
+            return False
 
-        # First try YouTube search
-        yt_details = None
-        if query:
-            results = VideosSearch(query, limit=1)
-            yt_results = await results.next()
-            if yt_results.get("result"):
-                data = yt_results["result"][0]
-                yt_details = {
-                    "title": data["title"],
-                    "link": data["link"],
-                    "vidid": data["id"],
-                    "duration_min": data["duration"],
-                    "thumb": data["thumbnails"][0]["url"].split("?")[0],
-                }
+        query = f"{track_name} {artist_name}" if artist_name else track_name
 
-        # Fallback: Apple/iTunes details only
-        if not yt_details:
-            yt_details = {
-                "title": track_name,
-                "link": preview or "",
-                "vidid": str(itunes_data.get("trackId")),
-                "duration_min": str(int(itunes_data.get("trackTimeMillis", 0) / 60000)),
-                "thumb": artwork,
-            }
+        # YouTube search
+        results = VideosSearch(query, limit=1)
+        yt_results = await results.next()
+        if not yt_results.get("result"):
+            return False
 
-        return yt_details, yt_details["vidid"]
+        data = yt_results["result"][0]
+        track_details = {
+            # YouTube details
+            "title": data["title"],
+            "link": data["link"],
+            "vidid": data["id"],
+            "duration_min": data["duration"],
+            "thumb": data["thumbnails"][0]["url"].split("?")[0],
+            # Apple Music details
+            "apple_title": track_name,
+            "apple_artist": artist_name,
+            "apple_album": album_name,
+            "apple_preview": preview,
+            "apple_artwork": artwork,
+        }
+        return track_details, data["id"]
 
     async def playlist(self, url, playid: Union[bool, str] = None):
         if playid:
@@ -104,38 +105,32 @@ class AppleAPI:
 
                 track_name = itunes_data.get("trackName")
                 artist_name = itunes_data.get("artistName")
+                album_name = itunes_data.get("collectionName")
                 preview = itunes_data.get("previewUrl")
                 artwork = itunes_data.get("artworkUrl100")
 
-                query = f"{track_name} {artist_name}" if track_name else None
+                query = f"{track_name} {artist_name}" if artist_name else track_name
 
-                # Try YouTube first
-                yt_details = None
-                if query:
-                    yt = VideosSearch(query, limit=1)
-                    yt_res = await yt.next()
-                    if yt_res.get("result"):
-                        data = yt_res["result"][0]
-                        yt_details = {
-                            "title": data["title"],
-                            "link": data["link"],
-                            "vidid": data["id"],
-                            "duration_min": data["duration"],
-                            "thumb": data["thumbnails"][0]["url"].split("?")[0],
-                        }
+                yt = VideosSearch(query, limit=1)
+                yt_res = await yt.next()
+                if not yt_res.get("result"):
+                    continue
 
-                # Fallback Apple
-                if not yt_details:
-                    yt_details = {
-                        "title": track_name,
-                        "link": preview or "",
-                        "vidid": str(itunes_data.get("trackId")),
-                        "duration_min": str(int(itunes_data.get("trackTimeMillis", 0) / 60000)),
-                        "thumb": artwork,
-                    }
-
-                results.append(yt_details)
-
+                data = yt_res["result"][0]
+                results.append({
+                    # YouTube details
+                    "title": data["title"],
+                    "link": data["link"],
+                    "vidid": data["id"],
+                    "duration_min": data["duration"],
+                    "thumb": data["thumbnails"][0]["url"].split("?")[0],
+                    # Apple Music details
+                    "apple_title": track_name,
+                    "apple_artist": artist_name,
+                    "apple_album": album_name,
+                    "apple_preview": preview,
+                    "apple_artwork": artwork,
+                })
             except Exception:
                 continue
 
