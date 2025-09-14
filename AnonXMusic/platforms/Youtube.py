@@ -91,7 +91,6 @@ class YouTubeUtils:
     import os
     import re
     import requests
-    
     @staticmethod
     async def download_with_fallback_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """Download using the fallback API (accepts video ID or full URL without validation)."""
@@ -112,25 +111,38 @@ class YouTubeUtils:
             if not is_video:
                 params["audioBitrate"] = "128"
 
-            # Stream download directly with requests
-            with requests.get(api_endpoint, params=params, stream=False, timeout=60) as r:
+            # Get JSON metadata from the API
+            with requests.get(api_endpoint, params=params, timeout=30) as r:
                 if r.status_code != 200:
                     LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
                     return None
 
-                # Parse API response to get filename
+                # Parse JSON to get download URL and filename
                 try:
                     response_json = r.json()
+                    download_url = response_json.get("data", {}).get("download", {}).get("url")
                     filename = response_json.get("data", {}).get("download", {}).get("filename", os.urandom(8).hex())
-                except ValueError:
-                    filename = os.urandom(8).hex()
+                except ValueError as e:
+                    LOGGER(__name__).error(f"Failed to parse API response: {e}")
+                    return None
+
+                if not download_url:
+                    LOGGER(__name__).error("No download URL found in API response.")
+                    return None
+
+            # Download the file from the download URL (no streaming)
+            with requests.get(download_url, timeout=30) as r:
+                if r.status_code != 200:
+                    LOGGER(__name__).error(f"Download URL returned status code {r.status_code}.")
+                    return None
 
                 ext = "mp4" if is_video else "mp3"
                 file_path = f"downloads/{filename}.{ext}"
 
                 os.makedirs("downloads", exist_ok=True)
+                # Write the entire content to file at once
                 with open(file_path, "wb") as f:
-                            f.write(content)
+                    f.write(r.content)  # Write full content instead of chunked streaming
 
                 if os.path.exists(file_path):
                     return file_path
