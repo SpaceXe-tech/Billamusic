@@ -276,11 +276,11 @@ async def shell_cmd(cmd):
 class YouTubeAPI:
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
-        self.regex = r"(?:youtube.com|youtu.be)"
+        self.regex = r"(?:youtube\.com|youtu\.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
-        # Fixed ANSI escape sequence regex - escaped the inner square brackets
-        self.reg = re.compile(r"\u001B(?:[@-Z\\-_]|[[0-?]*[ -/]*[@-~])")
+        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
         
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
