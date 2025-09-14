@@ -108,8 +108,10 @@ class HttpxClient:
     async def make_request(
         self,
         url: str,
+        method: str = "GET",
         max_retries: int = MAX_RETRIES,
         backoff_factor: float = BACKOFF_FACTOR,
+        json: Optional[dict] = None,
         **kwargs: Any,
     ) -> Optional[dict[str, Any]]:
         if not url:
@@ -117,14 +119,31 @@ class HttpxClient:
             return None
 
         headers = self._get_headers(url, kwargs.pop("headers", {}))
+        
         for attempt in range(max_retries):
             try:
                 start = time.monotonic()
-                response = await self._session.get(url, headers=headers, **kwargs)
+                
+                # Use the generic request method to handle both GET and POST
+                if method.upper() == "POST" and json:
+                    response = await self._session.post(url, headers=headers, json=json, **kwargs)
+                elif method.upper() == "GET":
+                    response = await self._session.get(url, headers=headers, **kwargs)
+                else:
+                    # Fallback to generic request method
+                    response = await self._session.request(method, url, headers=headers, json=json, **kwargs)
+                
                 response.raise_for_status()
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
-                return response.json()
+                
+                # Properly read the response content
+                try:
+                    response_text = response.text
+                    return response.json() if response_text else None
+                except ValueError:
+                    LOGGER(__name__).warning("Invalid JSON response from %s", url)
+                    return None
 
             except httpx.HTTPStatusError as e:
                 try:
@@ -143,7 +162,7 @@ class HttpxClient:
 
             except httpx.TooManyRedirects as e:
                 error_msg = f"Redirect loop for {url}: {repr(e)}"
-                LOGGER.warning(error_msg)
+                LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
