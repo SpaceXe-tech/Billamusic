@@ -1,3 +1,4 @@
+
 import asyncio
 import os
 import random
@@ -15,26 +16,10 @@ from AnonXMusic.logging import LOGGER
 from AnonXMusic.platforms._httpx import HttpxClient
 from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import API_URL, API_KEY
+from config import API_URL, API_KEY, LOGGER_ID
 
 
 class YouTubeUtils:
-    @staticmethod
-    async def shell_cmd(cmd):
-        """Execute a shell command and return its output."""
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, errorz = await proc.communicate()
-        if errorz:
-            if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
-                return out.decode("utf-8")
-            else:
-                return errorz.decode("utf-8")
-        return out.decode("utf-8")
-
     @staticmethod
     def get_cookie_file() -> Optional[str]:
         """Get a random cookie file from the 'AnonXMusic/assets' directory."""
@@ -51,39 +36,25 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_main_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using the main API with API key."""
+    async def download_with_main_api(video_id: str, is_video: bool = False) -> Optional[str]:
+        """Download using the main API (video_id only)."""
         try:
-            if not video_id_or_url:
+            if not video_id:
                 return None
-
-            # Determine if input is a URL or video ID
-            video_id = video_id_or_url
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            if re.match(r"^https?://", video_id_or_url):
-                video_url = video_id_or_url
-                # Extract video ID from URL if provided
-                video_id_match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
-                video_id = video_id_match.group(1) if video_id_match else video_id_or_url
 
             from AnonXMusic import app
-            # Use video_id for API request
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
-            
+
             if not res:
                 return None
-            
-            # Extract download URL from JSON response
-            download_url = res.get("url")
+
+            download_url = res.get("url") or res.get("results")
             if not download_url:
-                # Fallback to old structure if "url" not found
-                download_url = res.get("results")
-                if not download_url:
-                    return None
-            
+                return None
+
             source = res.get("source", "")
-            
+
             # Handle Telegram source
             if source == "database" and re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(\d+)", download_url):
                 try:
@@ -95,63 +66,55 @@ class YouTubeUtils:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value)
-                    return await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
+                    return await YouTubeUtils.download_with_main_api(video_id, is_video)
                 except Exception:
                     return None
-            
-            # Handle direct download URL (for download_api source or direct URLs)
-            if source == "download_api" or re.match(r"https?://", download_url) or download_url.startswith("http"):
-                # For download_api source, use the full video URL for downloading
-                if source == "download_api":
-                    download_url = video_url  # Use full URL for download_api
+
+            # Handle direct download URL
+            if source == "download_api" or download_url.startswith("http"):
                 download_result = await HttpxClient().download_file(download_url)
                 if download_result.success:
                     return download_result.file_path
-            
+
             return None
-            
+
         except Exception as e:
             LOGGER(__name__).error(f"Main API download error: {e}")
             return None
 
     @staticmethod
     async def download_with_fallback_api(video_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using the fallback API."""
+        """Download using the fallback API (requires full URL)."""
         try:
             api_endpoint = "https://ar-api-iauy.onrender.com/mp3youtube"
             format_param = "mp4" if is_video else "mp3"
-            
+
             params = {
                 "url": video_url,
                 "format": format_param,
             }
-            
             if not is_video:
                 params["audioBitrate"] = "128"
-            
+
             response = await HttpxClient().make_request(
                 url=api_endpoint,
                 params=params
             )
-            
+
             if not response or response.get("status") != 200 or response.get("successful") != "success":
                 return None
-            
-            # Extract download link from response
-            data = response.get("data", {})
-            download_info = data.get("download", {})
+
+            download_info = response.get("data", {}).get("download", {})
             download_link = download_info.get("url")
-            
             if not download_link:
                 return None
-            
-            # Download the file
+
             download_result = await HttpxClient().download_file(download_link)
             if download_result.success:
                 return download_result.file_path
-            
+
             return None
-            
+
         except Exception as e:
             LOGGER(__name__).error(f"Fallback API download error: {e}")
             return None
@@ -159,23 +122,44 @@ class YouTubeUtils:
     @staticmethod
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """
-        Download audio/video using APIs - first main API, then fallback.
-        Accepts both video IDs and full YouTube URLs directly.
+        Try main API first (video_id only), if it fails → switch to fallback (full URL).
         """
         if not video_id_or_url:
             return None
-        
-        # Try main API first with video ID or URL
-        result = await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
-        if result:
-            return result
-        
-        # Fallback to secondary API, always using full URL
-        video_url = video_id_or_url
-        if not re.match(r"^https?://", video_id_or_url):
-            video_url = f"https://www.youtube.com/watch?v={video_id_or_url}"
-        result = await YouTubeUtils.download_with_fallback_api(video_url, is_video)
-        return result
+
+        # Ensure video_id and video_url
+        if re.match(r"^https?://", video_id_or_url):
+            match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
+            video_id = match.group(1) if match else video_id_or_url
+            video_url = video_id_or_url
+        else:
+            video_id = video_id_or_url
+            video_url = f"https://youtube.com/watch?v={video_id}"
+
+        # Try main API (with video_id only)
+        main_result = await YouTubeUtils.download_with_main_api(video_id, is_video)
+        if main_result:
+            return main_result
+
+        # Fallback API (with full URL)
+        return await YouTubeUtils.download_with_fallback_api(video_url, is_video)
+
+    @staticmethod
+    async def shell_cmd(cmd):
+        """Execute a shell command and return its output."""
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, errorz = await proc.communicate()
+        if errorz:
+            if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
+                return out.decode("utf-8")
+            else:
+                return errorz.decode("utf-8")
+        return out.decode("utf-8")
+
 
 class YouTubeAPI:
     def __init__(self):
