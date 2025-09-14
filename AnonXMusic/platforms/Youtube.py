@@ -90,9 +90,15 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_fallback_api(video_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using the fallback API directly (via requests)."""
+    async def download_with_fallback_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
+        """Download using the fallback API (accepts video ID or full URL without validation)."""
         try:
+            # Construct full URL if input appears to be a video ID (no strict validation)
+            if len(video_id_or_url) == 11:  # Assume 11-character input is a video ID
+                video_url = f"https://www.youtube.com/watch?v={video_id_or_url}"
+            else:
+                video_url = video_id_or_url  # Use input directly if it’s not 11 characters
+
             api_endpoint = "https://ar-api-iauy.onrender.com/mp3youtube"
             format_param = "mp4" if is_video else "mp3"
 
@@ -109,7 +115,7 @@ class YouTubeUtils:
                     LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
                     return None
 
-                # Parse API response to get filename (if available)
+                # Parse API response to get filename
                 try:
                     response_json = r.json()
                     filename = response_json.get("data", {}).get("download", {}).get("filename", os.urandom(8).hex())
@@ -128,8 +134,8 @@ class YouTubeUtils:
                 if os.path.exists(file_path):
                     return file_path
 
-            LOGGER(__name__).error("Failed to save file from fallback API.")
-            return None
+                LOGGER(__name__).error("Failed to save file from fallback API.")
+                return None
 
         except Exception as e:
             LOGGER(__name__).error(f"Fallback API download error: {e}")
@@ -138,10 +144,10 @@ class YouTubeUtils:
     @staticmethod
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """
-        Try main API first (video_id only), if it fails → switch to fallback (full URL).
+        Try main API first (video_id only), if it fails → switch to fallback (video ID or URL).
         
         Args:
-            video_id_or_url: Either a YouTube video ID (e.g., 'eryV8GvERnk') or a full URL (e.g., 'https://www.youtube.com/watch?v=eryV8GvERnk').
+            video_id_or_url: Either a YouTube video ID (e.g., 'eryV8GvERnk') or a full URL.
             is_video: If True, download as video (mp4); otherwise, download as audio (mp3).
         
         Returns:
@@ -151,32 +157,15 @@ class YouTubeUtils:
             LOGGER(__name__).error("No video ID or URL provided.")
             return None
 
-        # Determine if input is a URL or video_id
-        if re.match(r"^https?://", video_id_or_url):
-            video_url = video_id_or_url
-            # Extract video_id from URL if possible
-            match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
-            video_id = match.group(1) if match else None
-        else:
-            video_id = video_id_or_url
-            video_url = f"https://youtube.com/watch?v={video_id}"
-
-        # Validate video_id for main API
-        if video_id and len(video_id) == 11 and re.match(r"[a-zA-Z0-9_-]{11}", video_id):
-            # Try main API (requires video_id)
-            main_result = await YouTubeUtils.download_with_main_api(video_id, is_video)
+        # Try main API with video_id (if input is likely a video ID)
+        if len(video_id_or_url) == 11:  # Assume 11-character input is a video ID
+            main_result = await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
             if main_result:
                 return main_result
-        else:
-            LOGGER(__name__).warning(f"Invalid video ID extracted: {video_id}. Falling back to URL-based download.")
-
-        # Validate URL for fallback API
-        if not re.match(r"https?://(www\.)?(youtube\.com|youtu\.be)/", video_url):
-            LOGGER(__name__).error(f"Invalid YouTube URL: {video_url}")
-            return None
-
-        # Fallback API (requires full URL)
-        return await YouTubeUtils.download_with_fallback_api(video_url, is_video)
+            LOGGER(__name__).warning(f"Main API failed for video ID: {video_id_or_url}. Falling back to fallback API.")
+        
+        # Fallback API (accepts video ID or URL)
+        return await YouTubeUtils.download_with_fallback_api(video_id_or_url, is_video)
 
     @staticmethod
     async def shell_cmd(cmd):
