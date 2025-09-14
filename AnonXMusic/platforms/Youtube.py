@@ -20,6 +20,22 @@ from config import API_URL, API_KEY
 
 class YouTubeUtils:
     @staticmethod
+    async def shell_cmd(cmd):
+        """Execute a shell command and return its output."""
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, errorz = await proc.communicate()
+        if errorz:
+            if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
+                return out.decode("utf-8")
+            else:
+                return errorz.decode("utf-8")
+        return out.decode("utf-8")
+
+    @staticmethod
     def get_cookie_file() -> Optional[str]:
         """Get a random cookie file from the 'AnonXMusic/assets' directory."""
         cookie_dir = "AnonXMusic/assets"
@@ -35,19 +51,23 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_main_api(video_id: str, is_video: bool = False) -> Optional[str]:
+    async def download_with_main_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """Download using the main API with API key."""
         try:
-            if not video_id:
+            if not video_id_or_url:
                 return None
 
-            from AnonXMusic import app
+            # Determine if input is a URL or video ID
+            video_id = video_id_or_url
             video_url = f"https://www.youtube.com/watch?v={video_id}"
+            if re.match(r"^https?://", video_id_or_url):
+                video_url = video_id_or_url
+                # Extract video ID from URL if provided
+                video_id_match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
+                video_id = video_id_match.group(1) if video_id_match else video_id_or_url
 
-            if re.match("^https?://", video_id):
-            video_url = video_id
-
-            # Use video_id directly without extraction - API handles
+            from AnonXMusic import app
+            # Use video_id for API request
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
             
@@ -58,17 +78,15 @@ class YouTubeUtils:
             download_url = res.get("url")
             if not download_url:
                 # Fallback to old structure if "url" not found
-                result_url = res.get("results")
-                if not result_url:
+                download_url = res.get("results")
+                if not download_url:
                     return None
-                download_url = result_url
             
             source = res.get("source", "")
             
             # Handle Telegram source
             if source == "database" and re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(\d+)", download_url):
                 try:
-                    from AnonXMusic import app
                     tg_match = re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(\d+)", download_url)
                     if tg_match:
                         chat_username, msg_id = tg_match.groups()
@@ -77,12 +95,15 @@ class YouTubeUtils:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value)
-                    return await YouTubeUtils.download_with_main_api(video_id, is_video)
+                    return await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
                 except Exception:
                     return None
             
-            # Handle direct download URL
-            if source == "download_api" or (source == "" and re.match(r"https?://", download_url)) or download_url.startswith("http"):
+            # Handle direct download URL (for download_api source or direct URLs)
+            if source == "download_api" or re.match(r"https?://", download_url) or download_url.startswith("http"):
+                # For download_api source, use the full video URL for downloading
+                if source == "download_api":
+                    download_url = video_url  # Use full URL for download_api
                 download_result = await HttpxClient().download_file(download_url)
                 if download_result.success:
                     return download_result.file_path
@@ -110,7 +131,6 @@ class YouTubeUtils:
             
             response = await HttpxClient().make_request(
                 url=api_endpoint,
-                method="GET",
                 params=params
             )
             
@@ -137,23 +157,25 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_api(video_id: str, is_video: bool = False) -> Optional[str]:
+    async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """
         Download audio/video using APIs - first main API, then fallback.
         Accepts both video IDs and full YouTube URLs directly.
         """
-        if not video_id:
+        if not video_id_or_url:
             return None
         
-        # Try main API first
-        result = await YouTubeUtils.download_with_main_api(video_id, is_video)
+        # Try main API first with video ID or URL
+        result = await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
         if result:
             return result
         
-        # Fallback to secondary API
-        result = await YouTubeUtils.download_with_fallback_api(video_id, is_video)
+        # Fallback to secondary API, always using full URL
+        video_url = video_id_or_url
+        if not re.match(r"^https?://", video_id_or_url):
+            video_url = f"https://www.youtube.com/watch?v={video_id_or_url}"
+        result = await YouTubeUtils.download_with_fallback_api(video_url, is_video)
         return result
-
 
 class YouTubeAPI:
     def __init__(self):
