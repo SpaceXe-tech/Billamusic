@@ -93,7 +93,7 @@ class YouTubeUtils:
     async def download_with_fallback_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """Download using the fallback API (accepts video ID or full URL)."""
         try:
-            # Always construct full URL if it looks like a YouTube ID, else leave as-is
+            # Always construct full URL if it's just a video ID
             if "youtube.com" not in video_id_or_url and "youtu.be" not in video_id_or_url:
                 video_url = f"https://www.youtube.com/watch?v={video_id_or_url}"
             else:
@@ -107,15 +107,15 @@ class YouTubeUtils:
                 "format": format_param,
             }
             if not is_video:
-                params["audioBitrate"] = "320"
+                params["audioBitrate"] = "256"
 
             # Retry until API responds with "url"
             response_json = None
-            for attempt in range(3):
+            for attempt in range(5):
                 with requests.get(api_endpoint, params=params, timeout=60) as r:
                     if r.status_code != 200:
                         LOGGER(__name__).warning(f"Fallback API attempt {attempt+1} returned {r.status_code}. Retrying...")
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)
                         continue
                     try:
                         response_json = r.json()
@@ -128,7 +128,7 @@ class YouTubeUtils:
                     if download_info.get("url"):
                         break  # Got a valid response
                     LOGGER(__name__).warning(f"No URL in response (attempt {attempt+1}). Retrying...")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
 
             if not response_json:
                 LOGGER(__name__).error("Fallback API gave no usable response after retries.")
@@ -143,23 +143,38 @@ class YouTubeUtils:
                 LOGGER(__name__).error("No download URL found in fallback API response.")
                 return None
 
-            # Download file directly
-            with requests.get(download_url, timeout=60) as r:
-                if r.status_code != 200:
-                    LOGGER(__name__).error(f"Download URL returned {r.status_code}.")
-                    return None
+            # Try downloading (2 retries, 1s delay)
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "*/*",
+                "Connection": "keep-alive",
+            }
 
-                ext = "mp4" if is_video else "mp3"
-                file_path = f"downloads/{filename}.{ext}"
+            for attempt in range(2):
+                try:
+                    with requests.get(download_url, headers=headers, stream=True, timeout=60) as r:
+                        if r.status_code != 200:
+                            LOGGER(__name__).warning(f"Download attempt {attempt+1} returned {r.status_code}. Retrying in 1s...")
+                            asyncio.sleep(1)
+                            continue
 
-                os.makedirs("downloads", exist_ok=True)
-                with open(file_path, "wb") as f:
-                    f.write(r.content)
+                        ext = "mp4" if is_video else "mp3"
+                        file_path = f"downloads/{filename}.{ext}"
+                        os.makedirs("downloads", exist_ok=True)
 
-                if os.path.exists(file_path):
-                    return file_path
+                        with open(file_path, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=1024 * 512):  # 512KB chunks
+                                if chunk:
+                                    f.write(chunk)
 
-            LOGGER(__name__).error("Failed to save file from fallback API.")
+                        if os.path.exists(file_path):
+                            return file_path
+
+                except Exception as e:
+                    LOGGER(__name__).warning(f"Download attempt {attempt+1} failed: {e}. Retrying in 1s...")
+                    await asyncio.sleep(1)
+
+            LOGGER(__name__).error("Failed to download file from fallback API after retries.")
             return None
 
         except Exception as e:
@@ -185,6 +200,7 @@ class YouTubeUtils:
         # Fallback API always works with either ID or URL
         return await YouTubeUtils.download_with_fallback_api(video_id_or_url, is_video)
 
+    
     @staticmethod
     async def shell_cmd(cmd):
         """Execute a shell command and return its output."""
