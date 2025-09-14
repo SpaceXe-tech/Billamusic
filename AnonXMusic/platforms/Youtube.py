@@ -1,4 +1,3 @@
-
 import asyncio
 import os
 import random
@@ -33,7 +32,8 @@ class YouTubeUtils:
             if not cookie_files:
                 return None
             return os.path.join(cookie_dir, random.choice(cookie_files))
-        except Exception:
+        except Exception as e:
+            LOGGER(__name__).error(f"Error accessing cookie files: {e}")
             return None
 
     @staticmethod
@@ -41,6 +41,7 @@ class YouTubeUtils:
         """Download using the main API (video_id only)."""
         try:
             if not video_id:
+                LOGGER(__name__).error("No video ID provided for main API download.")
                 return None
 
             from AnonXMusic import app
@@ -48,10 +49,12 @@ class YouTubeUtils:
             res = await HttpxClient().make_request(api_url)
 
             if not res:
+                LOGGER(__name__).error("Main API returned no response.")
                 return None
 
             download_url = res.get("url") or res.get("results")
             if not download_url:
+                LOGGER(__name__).error("Main API did not return a download URL.")
                 return None
 
             source = res.get("source", "")
@@ -66,9 +69,11 @@ class YouTubeUtils:
                         if msg_obj:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
+                    LOGGER(__name__).warning(f"FloodWait error, sleeping for {e.value} seconds.")
                     await asyncio.sleep(e.value)
                     return await YouTubeUtils.download_with_main_api(video_id, is_video)
-                except Exception:
+                except Exception as e:
+                    LOGGER(__name__).error(f"Telegram download error: {e}")
                     return None
 
             # Handle direct download URL
@@ -77,6 +82,7 @@ class YouTubeUtils:
                 if download_result.success:
                     return download_result.file_path
 
+            LOGGER(__name__).error("Main API returned an invalid download URL.")
             return None
 
         except Exception as e:
@@ -100,10 +106,18 @@ class YouTubeUtils:
             # Stream download directly with requests
             with requests.get(api_endpoint, params=params, stream=True, timeout=30) as r:
                 if r.status_code != 200:
+                    LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
                     return None
 
+                # Parse API response to get filename (if available)
+                try:
+                    response_json = r.json()
+                    filename = response_json.get("data", {}).get("download", {}).get("filename", os.urandom(8).hex())
+                except ValueError:
+                    filename = os.urandom(8).hex()
+
                 ext = "mp4" if is_video else "mp3"
-                file_path = f"downloads/{os.urandom(8).hex()}.{ext}"
+                file_path = f"downloads/{filename}.{ext}"
 
                 os.makedirs("downloads", exist_ok=True)
                 with open(file_path, "wb") as f:
@@ -114,6 +128,7 @@ class YouTubeUtils:
                 if os.path.exists(file_path):
                     return file_path
 
+            LOGGER(__name__).error("Failed to save file from fallback API.")
             return None
 
         except Exception as e:
@@ -124,25 +139,43 @@ class YouTubeUtils:
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """
         Try main API first (video_id only), if it fails → switch to fallback (full URL).
+        
+        Args:
+            video_id_or_url: Either a YouTube video ID (e.g., 'eryV8GvERnk') or a full URL (e.g., 'https://www.youtube.com/watch?v=eryV8GvERnk').
+            is_video: If True, download as video (mp4); otherwise, download as audio (mp3).
+        
+        Returns:
+            Optional[str]: Path to the downloaded file or None if download fails.
         """
         if not video_id_or_url:
+            LOGGER(__name__).error("No video ID or URL provided.")
             return None
 
-        # Ensure video_id and video_url
+        # Determine if input is a URL or video_id
         if re.match(r"^https?://", video_id_or_url):
-            match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
-            video_id = match.group(1) if match else video_id_or_url
             video_url = video_id_or_url
+            # Extract video_id from URL if possible
+            match = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", video_id_or_url)
+            video_id = match.group(1) if match else None
         else:
             video_id = video_id_or_url
             video_url = f"https://youtube.com/watch?v={video_id}"
 
-        # Try main API (with video_id only)
-        main_result = await YouTubeUtils.download_with_main_api(video_id, is_video)
-        if main_result:
-            return main_result
+        # Validate video_id for main API
+        if video_id and len(video_id) == 11 and re.match(r"[a-zA-Z0-9_-]{11}", video_id):
+            # Try main API (requires video_id)
+            main_result = await YouTubeUtils.download_with_main_api(video_id, is_video)
+            if main_result:
+                return main_result
+        else:
+            LOGGER(__name__).warning(f"Invalid video ID extracted: {video_id}. Falling back to URL-based download.")
 
-        # Fallback API (with full URL)
+        # Validate URL for fallback API
+        if not re.match(r"https?://(www\.)?(youtube\.com|youtu\.be)/", video_url):
+            LOGGER(__name__).error(f"Invalid YouTube URL: {video_url}")
+            return None
+
+        # Fallback API (requires full URL)
         return await YouTubeUtils.download_with_fallback_api(video_url, is_video)
 
     @staticmethod
@@ -294,7 +327,7 @@ class YouTubeAPI:
         if "&" in link:
             link = link.split("&")[0]
             
-        playlist = await shell_cmd(
+        playlist = await YouTubeUtils.shell_cmd(
             f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         
