@@ -46,7 +46,7 @@ class HttpxClient:
                 connect=self._timeout,
                 read=self._timeout,
                 write=self._timeout,
-                pool=self._timeout
+                pool=self._timeout,
             ),
             follow_redirects=max_redirects > 0,
             max_redirects=max_redirects,
@@ -84,7 +84,11 @@ class HttpxClient:
                 if file_path is None:
                     cd = response.headers.get("Content-Disposition", "")
                     match = re.search(r'filename="?([^"]+)"?', cd)
-                    filename = unquote(match[1]) if match else (Path(url).name or uuid.uuid4().hex)
+                    filename = (
+                        unquote(match[1])
+                        if match
+                        else (Path(url).name or uuid.uuid4().hex)
+                    )
                     path = Path(DOWNLOADS_DIR) / filename
                 else:
                     path = Path(file_path) if isinstance(file_path, str) else file_path
@@ -122,23 +126,23 @@ class HttpxClient:
                 response = await self._session.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
 
-                # ensure body is fully read before parsing json
-                await response.aread()
-                result = response.json()
+                # ✅ FIX: use async json parser
+                result = await response.json()
 
                 duration = time.monotonic() - start
-                LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
+                LOGGER(__name__).debug(
+                    "Request to %s succeeded in %.2fs", url, duration
+                )
                 return result
 
             except httpx.HTTPStatusError as e:
                 try:
-                    await e.response.aread()
-                    error_response = e.response.json()
+                    error_response = await e.response.json()
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
                     else:
                         error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
-                except ValueError:
+                except Exception:
                     error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
 
                 LOGGER(__name__).warning(error_msg)
@@ -192,3 +196,4 @@ class HttpxClient:
         elif isinstance(e, httpx.RequestError):
             return f"Request failed for {url}: {repr(e)}"
         return f"Unexpected error for {url}: {repr(e)}"
+
