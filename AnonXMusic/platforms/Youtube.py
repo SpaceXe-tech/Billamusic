@@ -88,18 +88,16 @@ class YouTubeUtils:
         except Exception as e:
             LOGGER(__name__).error(f"Main API download error: {e}")
             return None
-    import os
-    import re
-    import requests
+
     @staticmethod
     async def download_with_fallback_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using the fallback API (accepts video ID or full URL without validation)."""
+        """Download using the fallback API (accepts video ID or full URL)."""
         try:
-            # Construct full URL if input appears to be a video ID (no strict validation)
-            if len(video_id_or_url) == 11:  # Assume 11-character input is a video ID
+            # Always construct full URL if it looks like a YouTube ID, else leave as-is
+            if "youtube.com" not in video_id_or_url and "youtu.be" not in video_id_or_url:
                 video_url = f"https://www.youtube.com/watch?v={video_id_or_url}"
             else:
-                video_url = video_id_or_url  # Use input directly if it’s not 11 characters
+                video_url = video_id_or_url
 
             api_endpoint = "https://ar-api-iauy.onrender.com/mp3youtube"
             format_param = "mp4" if is_video else "mp3"
@@ -109,46 +107,60 @@ class YouTubeUtils:
                 "format": format_param,
             }
             if not is_video:
-                params["audioBitrate"] = "128"
+                params["audioBitrate"] = "320"
 
-            # Get JSON metadata from the API
-            with requests.get(api_endpoint, params=params, timeout=30) as r:
+            # Retry until API responds with "url"
+            response_json = None
+            for attempt in range(3):
+                with requests.get(api_endpoint, params=params, timeout=60) as r:
+                    if r.status_code != 200:
+                        LOGGER(__name__).warning(f"Fallback API attempt {attempt+1} returned {r.status_code}. Retrying...")
+                        await asyncio.sleep(1)
+                        continue
+                    try:
+                        response_json = r.json()
+                    except ValueError:
+                        LOGGER(__name__).warning(f"Fallback API returned invalid JSON on attempt {attempt+1}. Retrying...")
+                        await asyncio.sleep(2)
+                        continue
+
+                    download_info = response_json.get("data", {}).get("download", {})
+                    if download_info.get("url"):
+                        break  # Got a valid response
+                    LOGGER(__name__).warning(f"No URL in response (attempt {attempt+1}). Retrying...")
+                    await asyncio.sleep(1)
+
+            if not response_json:
+                LOGGER(__name__).error("Fallback API gave no usable response after retries.")
+                return None
+
+            download_url = response_json.get("data", {}).get("download", {}).get("url")
+            filename = response_json.get("data", {}).get("download", {}).get(
+                "filename", os.urandom(8).hex()
+            )
+
+            if not download_url:
+                LOGGER(__name__).error("No download URL found in fallback API response.")
+                return None
+
+            # Download file directly
+            with requests.get(download_url, timeout=60) as r:
                 if r.status_code != 200:
-                    LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
-                    return None
-
-                # Parse JSON to get download URL and filename
-                try:
-                    response_json = r.json()
-                    download_url = response_json.get("data", {}).get("download", {}).get("url")
-                    filename = response_json.get("data", {}).get("download", {}).get("filename", os.urandom(8).hex())
-                except ValueError as e:
-                    LOGGER(__name__).error(f"Failed to parse API response: {e}")
-                    return None
-
-                if not download_url:
-                    LOGGER(__name__).error("No download URL found in API response.")
-                    return None
-
-            # Download the file from the download URL (no streaming)
-            with requests.get(download_url, timeout=30) as r:
-                if r.status_code != 200:
-                    LOGGER(__name__).error(f"Download URL returned status code {r.status_code}.")
+                    LOGGER(__name__).error(f"Download URL returned {r.status_code}.")
                     return None
 
                 ext = "mp4" if is_video else "mp3"
                 file_path = f"downloads/{filename}.{ext}"
 
                 os.makedirs("downloads", exist_ok=True)
-                # Write the entire content to file at once
                 with open(file_path, "wb") as f:
-                    f.write(r.content)  # Write full content instead of chunked streaming
+                    f.write(r.content)
 
                 if os.path.exists(file_path):
                     return file_path
 
-                LOGGER(__name__).error("Failed to save file from fallback API.")
-                return None
+            LOGGER(__name__).error("Failed to save file from fallback API.")
+            return None
 
         except Exception as e:
             LOGGER(__name__).error(f"Fallback API download error: {e}")
@@ -157,27 +169,20 @@ class YouTubeUtils:
     @staticmethod
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """
-        Try main API first (video_id only), if it fails → switch to fallback (video ID or URL).
-        
-        Args:
-            video_id_or_url: Either a YouTube video ID (e.g., 'eryV8GvERnk') or a full URL.
-            is_video: If True, download as video (mp4); otherwise, download as audio (mp3).
-        
-        Returns:
-            Optional[str]: Path to the downloaded file or None if download fails.
+        Try main API first (if input is video_id), if it fails → fallback API.
         """
         if not video_id_or_url:
             LOGGER(__name__).error("No video ID or URL provided.")
             return None
 
-        # Try main API with video_id (if input is likely a video ID)
-        if len(video_id_or_url) == 11:  # Assume 11-character input is a video ID
+        # Try main API (only when input looks like a plain video_id without URL)
+        if "youtube.com" not in video_id_or_url and "youtu.be" not in video_id_or_url:
             main_result = await YouTubeUtils.download_with_main_api(video_id_or_url, is_video)
             if main_result:
                 return main_result
-            LOGGER(__name__).warning(f"Main API failed for video ID: {video_id_or_url}. Falling back to fallback API.")
-        
-        # Fallback API (accepts video ID or URL)
+            LOGGER(__name__).warning(f"Main API failed for {video_id_or_url}. Falling back to fallback API.")
+
+        # Fallback API always works with either ID or URL
         return await YouTubeUtils.download_with_fallback_api(video_id_or_url, is_video)
 
     @staticmethod
