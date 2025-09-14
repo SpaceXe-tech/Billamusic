@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 from urllib.parse import unquote
-from AnonXMusic import app
+
 import aiofiles
 import httpx
 
@@ -36,7 +36,7 @@ class HttpxClient:
         self,
         timeout: int = DEFAULT_TIMEOUT,
         download_timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
-        max_redirects: int = 5,  # Increased to handle potential redirects
+        max_redirects: int = 5,
     ) -> None:
         self._timeout = timeout
         self._download_timeout = download_timeout
@@ -63,7 +63,6 @@ class HttpxClient:
         headers = base_headers.copy()
         if API_URL and url.startswith(API_URL):
             headers["X-API-Key"] = API_KEY
-        # Add User-Agent to mimic browser for fallback API compatibility
         headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -136,9 +135,13 @@ class HttpxClient:
 
                 # Parse JSON response
                 try:
-                    result = await response.json()
+                    result = response.json()  # Remove await here
+                    if not isinstance(result, dict):
+                        error_msg = f"Invalid JSON response from {url}: Expected dict, got {type(result)}"
+                        LOGGER(__name__).error(error_msg)
+                        return None
                 except ValueError as e:
-                    error_msg = f"Invalid JSON response from {url}: {repr(e)}"
+                    error_msg = f"Invalid JSON response from {url}: {repr(e)}. Response body: {response.text}"
                     LOGGER(__name__).error(error_msg)
                     return None
 
@@ -165,7 +168,7 @@ class HttpxClient:
 
             except httpx.HTTPStatusError as e:
                 try:
-                    error_response = await e.response.json()
+                    error_response = e.response.json()
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
                     else:
@@ -190,11 +193,6 @@ class HttpxClient:
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
-
-            except ValueError as e:
-                error_msg = f"Invalid JSON response from {url}: {repr(e)}"
-                LOGGER(__name__).error(error_msg)
-                return None
 
             except Exception as e:
                 error_msg = f"Unexpected error for {url}: {repr(e)}"
