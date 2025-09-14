@@ -28,70 +28,126 @@ class YouTubeUtils:
         cookie_dir = "AnonXMusic/assets"
         try:
             if not os.path.exists(cookie_dir):
-                LOGGER(__name__).warning("Cookie directory '%s' does not exist.", cookie_dir)
                 return None
 
             files = os.listdir(cookie_dir)
             cookies_files = [f for f in files if f.endswith(".txt") and f != "cookie_time.txt"]
 
             if not cookies_files:
-                LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
                 return None
 
             random_file = random.choice(cookies_files)
             return os.path.join(cookie_dir, random_file)
 
         except Exception as e:
-            LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
+            return None
+
+    @staticmethod
+    def extract_video_id(url: str) -> Optional[str]:
+        """
+        Extract YouTube video ID from various URL formats.
+        Supports youtube.com, youtu.be, and embed URLs.
+        """
+        if not url:
+            return None
+            
+        # Regex pattern to extract video ID from various YouTube URL formats
+        patterns = [
+            r'(?:v=|/)([0-9A-Za-z_-]{11})(?:S+|$)',  # Standard and embed URLs
+            r'(?:youtu.be/)([0-9A-Za-z_-]{11})(?:S+|$)',  # Shortened URLs
+            r'^([0-9A-Za-z_-]{11})$',  # Direct video ID
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match and len(match.group(1)) == 11:
+                return match.group(1)
+        
+        return None
+
+    @staticmethod
+    def create_filename_with_video_id(original_path: Path, video_id: str) -> Path:
+        """
+        Create a new filename using video_id while preserving extension.
+        """
+        if not video_id:
+            return original_path
+            
+        # Get the file extension
+        extension = original_path.suffix
+        # Create new filename with video_id
+        new_filename = f"{video_id}{extension}"
+        # Return new path with same parent directory
+        return original_path.parent / new_filename
+
+    @staticmethod
+    async def download_and_rename_file(download_url: str, video_id: str) -> Optional[Path]:
+        """
+        Download file and rename it with video_id.
+        """
+        try:
+            # Download the file
+            download_result = await HttpxClient().download_file(download_url)
+            
+            if not download_result.success:
+                return None
+                
+            original_path = Path(download_result.file_path)
+            
+            # Create new filename with video_id
+            new_path = YouTubeUtils.create_filename_with_video_id(original_path, video_id)
+            
+            # Rename the file if the new name is different
+            if original_path != new_path:
+                try:
+                    original_path.rename(new_path)
+                    return new_path
+                except Exception as e:
+                    return original_path
+            
+            return original_path
+            
+        except Exception as e:
+            return None
 
     @staticmethod
     async def download_with_new_api(
         video_url: str, 
         is_video: bool = False, 
-        bitrate: str = "128k", 
+        bitrate: str = "128", 
         quality: str = "720p"
     ) -> Optional[Path]:
         """
-        Download audio/video using the new POST API.
-        
-        Args:
-            video_url: Full YouTube URL or video ID
-            is_video: Whether to download video (True) or audio (False)
-            bitrate: Audio bitrate (e.g., "128k", "192k", "320k")
-            quality: Video quality (e.g., "720p", "1080p", "480p")
-        
-        Returns:
-            Path to downloaded file or None if failed
+        Download audio/video using the new GET API and rename with video_id.
         """
         if not video_url:
-            LOGGER(__name__).warning("Video URL is None")
             return None
 
         try:
-            # API endpoint - update this to your actual API URL
-            api_endpoint = "http://69.62.84.40:8000/api/v1/download"
+            # Extract video ID for naming
+            video_id = YouTubeUtils.extract_video_id(video_url)
+            if not video_id:
+                return None
+
+            # Determine API endpoint based on format
+            api_endpoint = "https://ar-api-iauy.onrender.com/mp3youtube"
+            format_param = "mp4" if is_video else "mp3"
             
-            # Prepare request payload
-            payload = {
+            # Prepare query parameters for GET request
+            params = {
                 "url": video_url,
-                "bitrate": bitrate,
-                "quality": quality,
-                "x_lang": "en"
+                "format": format_param,
             }
             
-            # Prepare headers
-            headers = {
-                "accept": "application/json",
-                "x-lang": "en",
-                "Content-Type": "application/json"
-            }
+            # Add audioBitrate for audio downloads
+            if not is_video:
+                params["audioBitrate"] = bitrate
             
-            # Make POST request to the API
+            # Make GET request to the API
             response = await HttpxClient().make_request(
                 url=api_endpoint,
-                method="POST",
-                json=payload,
-                headers=headers
+                method="GET",
+                params=params
             )
             
             if not response:
@@ -99,30 +155,26 @@ class YouTubeUtils:
                 return None
                 
             # Check if download was successful
-            if not response.get("is_success", False):
-                LOGGER(__name__).error("API returned failure: %s", response)
+            if response.get("status") != 200 or response.get("successful") != "success":
+                LOGGER(__name__).error(f"API returned failure: {response.get('status')}")
                 return None
                 
-            # Extract download link
-            download_link = response.get("link")
+            # Extract download link from the new API response structure
+            data = response.get("data", {})
+            download_info = data.get("download", {})
+            download_link = download_info.get("url")
+            
             if not download_link:
                 LOGGER(__name__).error("No download link in API response")
                 return None
-                
-            # Get filename and filesize for logging
-            filename = response.get("filename", "unknown")
-            filesize = response.get("filesize", "unknown")
             
-            LOGGER(__name__).info(f"Downloading: {filename} ({filesize})")
+            # Download and rename the file with video_id
+            result_path = await YouTubeUtils.download_and_rename_file(download_link, video_id)
             
-            # Download the file from the provided link
-            download_result = await HttpxClient().download_file(download_link)
-            
-            if download_result.success:
-                LOGGER(__name__).info(f"Successfully downloaded: {download_result.file_path}")
-                return Path(download_result.file_path)
+            if result_path:
+                return result_path
             else:
-                LOGGER(__name__).error("Failed to download file from link")
+                LOGGER(__name__).error("Failed to download file")
                 return None
                 
         except Exception as e:
@@ -132,15 +184,20 @@ class YouTubeUtils:
     @staticmethod
     async def download_with_api(video_id_or_url: str, is_video: bool = False) -> Optional[Path]:
         """
-        Download audio/video using the new POST API first, then fallback to old API.
+        Download audio/video using the new GET API first, then fallback to old API.
+        All files are renamed with video_id.
         """
         if not video_id_or_url:
-            LOGGER(__name__).warning("Video ID or URL is None")
             return None
 
         try:
-            # Try new POST API first
-            bitrate = "128k" if not is_video else "192k"
+            # Extract video ID for consistent naming
+            video_id = YouTubeUtils.extract_video_id(video_id_or_url)
+            if not video_id:
+                return None
+
+            # Try new GET API first
+            bitrate = "128" if not is_video else "192"
             quality = "720p" if is_video else "480p"
             
             result = await YouTubeUtils.download_with_new_api(
@@ -149,26 +206,9 @@ class YouTubeUtils:
             
             if result:
                 return result
-                
-            LOGGER(__name__).info("New API failed, trying fallback method...")
             
-            # Fallback to old API logic (your existing code)
+            # Fallback to old API logic with video_id naming
             from AnonXMusic import app  # Local import inside function
-
-            # Extract video_id if full YouTube URL given
-            video_id = video_id_or_url
-            # Regex to extract video id from youtube URL parameters
-            yt_video_id_match = re.search(
-                r"(?:v=|/)([0-9A-Za-z_-]{11})(?:&|$)", video_id_or_url
-            )
-            if yt_video_id_match:
-                video_id = yt_video_id_match.group(1)
-            elif re.match(r"^[0-9A-Za-z_-]{11}$", video_id_or_url):
-                video_id = video_id_or_url  # Already a valid ID
-            else:
-                # Could not parse valid video_id
-                LOGGER(__name__).warning("Invalid video ID or URL format")
-                return None
 
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
@@ -177,7 +217,6 @@ class YouTubeUtils:
                 LOGGER(__name__).error("Fallback API response empty")
                 return None
 
-            msg = res.get("message")
             result_url = res.get("results")
             if not result_url:
                 LOGGER(__name__).error("No 'results' in fallback API response")
@@ -192,19 +231,26 @@ class YouTubeUtils:
                         chat_username, msg_id = tg_match.groups()
                         msg_obj = await app.get_messages(chat_username, int(msg_id))
                         if msg_obj:
-                            return await msg_obj.download()
+                            # Download from Telegram and rename with video_id
+                            downloaded_path = await msg_obj.download()
+                            if downloaded_path:
+                                original_path = Path(downloaded_path)
+                                new_path = YouTubeUtils.create_filename_with_video_id(original_path, video_id)
+                                if original_path != new_path:
+                                    original_path.rename(new_path)
+                                    return new_path
+                                return original_path
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value + 0)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
-                    LOGGER(__name__).error(f"Telegram fetch error: {e}")
                     return None
 
             if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
-                dl = await HttpxClient().download_file(result_url)
-                return dl.file_path if dl.success else None
+                # Download and rename with video_id
+                result_path = await YouTubeUtils.download_and_rename_file(result_url, video_id)
+                return result_path
 
-            LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
             return None
 
         except Exception as e:
@@ -230,10 +276,10 @@ async def shell_cmd(cmd):
 class YouTubeAPI:
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
-        self.regex = r"(?:youtube\.com|youtu\.be)"
+        self.regex = r"(?:youtube.com|youtu.be)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
-        self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        self.reg = re.compile(r"\u001B(?:[@-Z\\-_]|[[0-?]*[ -/]*[@-~])")
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
@@ -334,7 +380,8 @@ class YouTubeAPI:
         )
         stdout, stderr = await proc.communicate()
         if stdout:
-            return 1, stdout.decode().split("\n")[0]
+            return 1, stdout.decode().split("
+")[0]
         else:
             return 0, stderr.decode()
 
@@ -347,7 +394,8 @@ class YouTubeAPI:
             f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         try:
-            result = playlist.split("\n")
+            result = playlist.split("
+")
             for key in result:
                 if key == "":
                     result.remove(key)
@@ -445,10 +493,13 @@ class YouTubeAPI:
             link = self.base + link
         loop = asyncio.get_running_loop()
 
+        # Extract video ID for consistent naming
+        video_id = YouTubeUtils.extract_video_id(link)
+
         def audio_dl():
             ydl_optssx = {
                 "format": "bestaudio/best",
-                "outtmpl": "downloads/%(id)s.%(ext)s",
+                "outtmpl": f"downloads/{video_id}.%(ext)s" if video_id else "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "nocheckcertificate": True,
                 "quiet": True,
@@ -457,7 +508,8 @@ class YouTubeAPI:
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
-            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            filename = f"{video_id}.{info['ext']}" if video_id else f"{info['id']}.{info['ext']}"
+            xyz = os.path.join("downloads", filename)
             if os.path.exists(xyz):
                 return xyz
             x.download([link])
@@ -466,7 +518,7 @@ class YouTubeAPI:
         def video_dl():
             ydl_optssx = {
                 "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
-                "outtmpl": "downloads/%(id)s.%(ext)s",
+                "outtmpl": f"downloads/{video_id}.%(ext)s" if video_id else "downloads/%(id)s.%(ext)s",
                 "geo_bypass": True,
                 "cookiefile": YouTubeUtils.get_cookie_file(),
                 "nocheckcertificate": True,
@@ -475,7 +527,8 @@ class YouTubeAPI:
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
             info = x.extract_info(link, False)
-            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            filename = f"{video_id}.{info['ext']}" if video_id else f"{info['id']}.{info['ext']}"
+            xyz = os.path.join("downloads", filename)
             if os.path.exists(xyz):
                 return xyz
             x.download([link])
@@ -483,7 +536,8 @@ class YouTubeAPI:
 
         def song_video_dl():
             formats = f"{format_id}+140"
-            fpath = f"downloads/{title}"
+            filename = f"{video_id}" if video_id else title
+            fpath = f"downloads/{filename}"
             ydl_optssx = {
                 "format": formats,
                 "outtmpl": fpath,
@@ -499,7 +553,8 @@ class YouTubeAPI:
             x.download([link])
 
         def song_audio_dl():
-            fpath = f"downloads/{title}.%(ext)s"
+            filename = f"{video_id}" if video_id else title
+            fpath = f"downloads/{filename}.%(ext)s"
             ydl_optssx = {
                 "format": format_id,
                 "outtmpl": fpath,
@@ -525,13 +580,15 @@ class YouTubeAPI:
                 return str(dl)
 
             await loop.run_in_executor(None, song_video_dl)
-            fpath = f"downloads/{title}.mp4"
+            filename = f"{video_id}" if video_id else title
+            fpath = f"downloads/{filename}.mp4"
             return fpath
         elif songaudio:
             if dl := await YouTubeUtils.download_with_api(link):
                 return str(dl)
             await loop.run_in_executor(None, song_audio_dl)
-            fpath = f"downloads/{title}.mp3"
+            filename = f"{video_id}" if video_id else title
+            fpath = f"downloads/{filename}.mp3"
             return fpath
         elif video:
             if await is_on_off(1):
@@ -553,7 +610,7 @@ class YouTubeAPI:
                 )
                 stdout, stderr = await proc.communicate()
                 if stdout:
-                    downloaded_file = stdout.decode().split("\n")[0]
+                    downloaded_file = stdout.decode().split("")[0]
                     direct = None
                 else:
                     return
