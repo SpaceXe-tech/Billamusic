@@ -3,7 +3,7 @@ import os
 import random
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import yt_dlp
 from pyrogram import errors
