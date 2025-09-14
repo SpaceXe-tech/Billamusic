@@ -65,7 +65,6 @@ class HttpxClient:
             headers["X-API-Key"] = API_KEY
         return headers
 
-
     async def download_file(
         self,
         url: str,
@@ -122,12 +121,18 @@ class HttpxClient:
                 start = time.monotonic()
                 response = await self._session.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
+
+                # ensure body is fully read before parsing json
+                await response.aread()
+                result = response.json()
+
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
-                return response.json()
+                return result
 
             except httpx.HTTPStatusError as e:
                 try:
+                    await e.response.aread()
                     error_response = e.response.json()
                     if isinstance(error_response, dict) and "error" in error_response:
                         error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
