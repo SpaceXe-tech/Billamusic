@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 from urllib.parse import unquote
-
+from AnonXMusic import app
 import aiofiles
 import httpx
 
@@ -36,7 +36,7 @@ class HttpxClient:
         self,
         timeout: int = DEFAULT_TIMEOUT,
         download_timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
-        max_redirects: int = 0,
+        max_redirects: int = 5,  # Increased to handle potential redirects
     ) -> None:
         self._timeout = timeout
         self._download_timeout = download_timeout
@@ -63,6 +63,11 @@ class HttpxClient:
         headers = base_headers.copy()
         if API_URL and url.startswith(API_URL):
             headers["X-API-Key"] = API_KEY
+        # Add User-Agent to mimic browser for fallback API compatibility
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        )
         return headers
 
     async def download_file(
@@ -120,14 +125,37 @@ class HttpxClient:
             return None
 
         headers = self._get_headers(url, kwargs.pop("headers", {}))
+        params = kwargs.pop("params", None)
         for attempt in range(max_retries):
             try:
                 start = time.monotonic()
-                response = await self._session.get(url, headers=headers, **kwargs)
+                response = await self._session.get(
+                    url, headers=headers, params=params, **kwargs
+                )
                 response.raise_for_status()
 
-                # ✅ FIX: use async json parser
-                result = await response.json()
+                # Parse JSON response
+                try:
+                    result = await response.json()
+                except ValueError as e:
+                    error_msg = f"Invalid JSON response from {url}: {repr(e)}"
+                    LOGGER(__name__).error(error_msg)
+                    return None
+
+                # Handle fallback API response specifically
+                if url.startswith("https://ar-api-iauy.onrender.com/mp3youtube"):
+                    if (
+                        not isinstance(result, dict)
+                        or result.get("status") != 200
+                        or result.get("successful") != "success"
+                    ):
+                        error_msg = f"Fallback API error for {url}: {result.get('message', 'Unknown error')}"
+                        LOGGER(__name__).warning(error_msg)
+                        if attempt == max_retries - 1:
+                            LOGGER(__name__).error(error_msg)
+                            return None
+                        await asyncio.sleep(backoff_factor * (2 ** attempt))
+                        continue
 
                 duration = time.monotonic() - start
                 LOGGER(__name__).debug(
@@ -144,7 +172,6 @@ class HttpxClient:
                         error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
                 except Exception:
                     error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
-
                 LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
@@ -152,7 +179,7 @@ class HttpxClient:
 
             except httpx.TooManyRedirects as e:
                 error_msg = f"Redirect loop for {url}: {repr(e)}"
-                LOGGER.warning(error_msg)
+                LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
                     return None
@@ -196,4 +223,3 @@ class HttpxClient:
         elif isinstance(e, httpx.RequestError):
             return f"Request failed for {url}: {repr(e)}"
         return f"Unexpected error for {url}: {repr(e)}"
-
