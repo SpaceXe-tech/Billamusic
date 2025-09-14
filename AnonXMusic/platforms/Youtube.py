@@ -88,7 +88,10 @@ class YouTubeUtils:
         except Exception as e:
             LOGGER(__name__).error(f"Main API download error: {e}")
             return None
-
+    import os
+    import re
+    import requests
+    
     @staticmethod
     async def download_with_fallback_api(video_id_or_url: str, is_video: bool = False) -> Optional[str]:
         """Download using the fallback API (accepts video ID or full URL without validation)."""
@@ -110,7 +113,7 @@ class YouTubeUtils:
                 params["audioBitrate"] = "128"
 
             # Stream download directly with requests
-            with requests.get(api_endpoint, params=params, stream=True, timeout=30) as r:
+            with requests.get(api_endpoint, params=params, stream=False, timeout=40) as r:
                 if r.status_code != 200:
                     LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
                     return None
@@ -127,8 +130,6 @@ class YouTubeUtils:
 
                 os.makedirs("downloads", exist_ok=True)
                 with open(file_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
                             f.write(chunk)
 
                 if os.path.exists(file_path):
