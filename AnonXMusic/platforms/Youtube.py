@@ -113,7 +113,7 @@ class YouTubeUtils:
                 params["audioBitrate"] = "128"
 
             # Stream download directly with requests
-            with requests.get(api_endpoint, params=params, stream=False, timeout=40) as r:
+            with requests.get(api_endpoint, params=params, stream=False, timeout=60) as r:
                 if r.status_code != 200:
                     LOGGER(__name__).error(f"Fallback API returned status code {r.status_code}.")
                     return None
@@ -130,7 +130,7 @@ class YouTubeUtils:
 
                 os.makedirs("downloads", exist_ok=True)
                 with open(file_path, "wb") as f:
-                            f.write(chunk)
+                            f.write(content)
 
                 if os.path.exists(file_path):
                     return file_path
