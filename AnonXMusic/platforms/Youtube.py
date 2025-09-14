@@ -84,7 +84,7 @@ class YouTubeUtils:
 
     @staticmethod
     async def download_with_fallback_api(video_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using the fallback API (requires full URL)."""
+        """Download using the fallback API directly (via requests)."""
         try:
             api_endpoint = "https://ar-api-iauy.onrender.com/mp3youtube"
             format_param = "mp4" if is_video else "mp3"
@@ -96,22 +96,22 @@ class YouTubeUtils:
             if not is_video:
                 params["audioBitrate"] = "128"
 
-            response = await HttpxClient().make_request(
-                url=api_endpoint,
-                params=params
-            )
+            # Stream download directly with requests
+            with requests.get(api_endpoint, params=params, stream=True, timeout=30) as r:
+                if r.status_code != 200:
+                    return None
 
-            if not response or response.get("status") != 200 or response.get("successful") != "success":
-                return None
+                ext = "mp4" if is_video else "mp3"
+                file_path = f"downloads/{os.urandom(8).hex()}.{ext}"
 
-            download_info = response.get("data", {}).get("download", {})
-            download_link = download_info.get("url")
-            if not download_link:
-                return None
+                os.makedirs("downloads", exist_ok=True)
+                with open(file_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
 
-            download_result = await HttpxClient().download_file(download_link)
-            if download_result.success:
-                return download_result.file_path
+                if os.path.exists(file_path):
+                    return file_path
 
             return None
 
