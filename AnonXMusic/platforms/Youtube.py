@@ -380,8 +380,7 @@ class YouTubeAPI:
         )
         stdout, stderr = await proc.communicate()
         if stdout:
-            return 1, stdout.decode().split("
-")[0]
+            return 1, stdout.decode().split("")[0]
         else:
             return 0, stderr.decode()
 
@@ -394,8 +393,7 @@ class YouTubeAPI:
             f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         try:
-            result = playlist.split("
-")
+            result = playlist.split("")
             for key in result:
                 if key == "":
                     result.remove(key)
