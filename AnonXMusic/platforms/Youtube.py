@@ -17,6 +17,7 @@ from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
 from config import API_URL, API_KEY
 
+
 class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
@@ -34,30 +35,19 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    def extract_video_id(url: str) -> Optional[str]:
-        """Extract YouTube video ID from various URL formats."""
-        if not url:
-            return None
-        patterns = [
-            r'(?:v=|/)([0-9A-Za-z_-]{11})(?:S+|$)',
-            r'(?:youtu.be/)([0-9A-Za-z_-]{11})(?:S+|$)',
-            r'^([0-9A-Za-z_-]{11})$',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match and len(match.group(1)) == 11:
-                return match.group(1)
-        return None
-
-    @staticmethod
-    async def download_with_main_api(video_url: str, is_video: bool = False) -> Optional[str]:
+    async def download_with_main_api(video_id: str, is_video: bool = False) -> Optional[str]:
         """Download using the main API with API key."""
         try:
-            video_id = YouTubeUtils.extract_video_id(video_url)
             if not video_id:
                 return None
-            
-            # Main API endpoint with API key
+
+            from AnonXMusic import app
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            if re.match("^https?://", video_id):
+            video_url = video_id
+
+            # Use video_id directly without extraction - API handles
             api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
             res = await HttpxClient().make_request(api_url)
             
@@ -76,10 +66,10 @@ class YouTubeUtils:
             source = res.get("source", "")
             
             # Handle Telegram source
-            if source == "database" and re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(d+)", download_url):
+            if source == "database" and re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(\d+)", download_url):
                 try:
                     from AnonXMusic import app
-                    tg_match = re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(d+)", download_url)
+                    tg_match = re.match(r"https://t.me/([a-zA-Z0-9_]{5,})/(\d+)", download_url)
                     if tg_match:
                         chat_username, msg_id = tg_match.groups()
                         msg_obj = await app.get_messages(chat_username, int(msg_id))
@@ -87,7 +77,7 @@ class YouTubeUtils:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
                     await asyncio.sleep(e.value)
-                    return await YouTubeUtils.download_with_main_api(video_url, is_video)
+                    return await YouTubeUtils.download_with_main_api(video_id, is_video)
                 except Exception:
                     return None
             
@@ -147,35 +137,22 @@ class YouTubeUtils:
             return None
 
     @staticmethod
-    async def download_with_api(video_url: str, is_video: bool = False) -> Optional[str]:
-        """Download using main API first, then fallback API."""
-        if not video_url:
+    async def download_with_api(video_id: str, is_video: bool = False) -> Optional[str]:
+        """
+        Download audio/video using APIs - first main API, then fallback.
+        Accepts both video IDs and full YouTube URLs directly.
+        """
+        if not video_id:
             return None
         
         # Try main API first
-        result = await YouTubeUtils.download_with_main_api(video_url, is_video)
+        result = await YouTubeUtils.download_with_main_api(video_id, is_video)
         if result:
             return result
         
         # Fallback to secondary API
-        result = await YouTubeUtils.download_with_fallback_api(video_url, is_video)
+        result = await YouTubeUtils.download_with_fallback_api(video_id, is_video)
         return result
-
-
-async def shell_cmd(cmd):
-    """Execute shell command asynchronously."""
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, errorz = await proc.communicate()
-    if errorz:
-        if "unavailable videos are hidden" in errorz.decode("utf-8").lower():
-            return out.decode("utf-8")
-        else:
-            return errorz.decode("utf-8")
-    return out.decode("utf-8")
 
 
 class YouTubeAPI:
@@ -216,22 +193,22 @@ class YouTubeAPI:
                     if entity.type == MessageEntityType.TEXT_LINK:
                         return entity.url
         
-        if offset in (None,):
+        if offset is None:
             return None
-        return text[offset : offset + length]
+        return text[offset:offset + length]
 
     async def details(self, link: str, videoid: Union[bool, str] = None):
         """Get video details."""
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             title = result["title"]
             duration_min = result["duration"]
-            thumbnail = result["thumbnails"]["url"].split("?")
+            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
             vidid = result["id"]
             if str(duration_min) == "None":
                 duration_sec = 0
@@ -244,7 +221,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
@@ -256,7 +233,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
@@ -268,11 +245,11 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
-            thumbnail = result["thumbnails"]["url"].split("?")
+            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
         return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
@@ -280,11 +257,11 @@ class YouTubeAPI:
         # Try API download first
         if dl := await YouTubeUtils.download_with_api(link, True):
             return True, str(dl)
-# Fallback to yt-dlp stream URL
+        # Fallback to yt-dlp stream URL
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
@@ -299,7 +276,7 @@ class YouTubeAPI:
         stdout, stderr = await proc.communicate()
         
         if stdout:
-            return 1, stdout.decode().split("")
+            return 1, stdout.decode().split("\n")[0]
         else:
             return 0, stderr.decode()
 
@@ -308,17 +285,15 @@ class YouTubeAPI:
         if videoid:
             link = self.listbase + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         playlist = await shell_cmd(
             f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         
         try:
-            result = playlist.split("")
-            for key in result:
-                if key == "":
-                    result.remove(key)
+            result = playlist.split("\n")
+            result = [key for key in result if key]
         except:
             result = []
         return result
@@ -328,7 +303,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
@@ -336,7 +311,7 @@ class YouTubeAPI:
             duration_min = result["duration"]
             vidid = result["id"]
             yturl = result["link"]
-            thumbnail = result["thumbnails"]["url"].split("?")
+            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
             
         track_details = {
             "title": title,
@@ -352,7 +327,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         ytdl_opts = {"quiet": True}
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
@@ -391,7 +366,7 @@ class YouTubeAPI:
         if videoid:
             link = self.base + link
         if "&" in link:
-            link = link.split("&")
+            link = link.split("&")[0]
             
         a = VideosSearch(link, limit=10)
         result = (await a.next()).get("result")
@@ -399,7 +374,7 @@ class YouTubeAPI:
         title = result[query_type]["title"]
         duration_min = result[query_type]["duration"]
         vidid = result[query_type]["id"]
-        thumbnail = result[query_type]["thumbnails"]["url"].split("?")
+        thumbnail = result[query_type]["thumbnails"][0]["url"].split("?")[0]
         
         return title, duration_min, thumbnail, vidid
 
@@ -529,7 +504,7 @@ class YouTubeAPI:
                 )
                 stdout, stderr = await proc.communicate()
                 if stdout:
-                    downloaded_file = stdout.decode().split("")
+                    downloaded_file = stdout.decode().split("\n")[0]
                     direct = None
                 else:
                     return
