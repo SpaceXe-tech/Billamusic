@@ -28,7 +28,7 @@ class DownloadResult:
 class HttpxClient:
     DEFAULT_TIMEOUT = 120
     DEFAULT_DOWNLOAD_TIMEOUT = 120
-    CHUNK_SIZE = 8192
+    CHUNK_SIZE = 1024
     MAX_RETRIES = 2
     BACKOFF_FACTOR = 1.0
 
@@ -36,7 +36,7 @@ class HttpxClient:
         self,
         timeout: int = DEFAULT_TIMEOUT,
         download_timeout: int = DEFAULT_DOWNLOAD_TIMEOUT,
-        max_redirects: int = 5,
+        max_redirects: int = 0,
     ) -> None:
         self._timeout = timeout
         self._download_timeout = download_timeout
@@ -46,7 +46,7 @@ class HttpxClient:
                 connect=self._timeout,
                 read=self._timeout,
                 write=self._timeout,
-                pool=self._timeout,
+                pool=self._timeout
             ),
             follow_redirects=max_redirects > 0,
             max_redirects=max_redirects,
@@ -63,10 +63,6 @@ class HttpxClient:
         headers = base_headers.copy()
         if API_URL and url.startswith(API_URL):
             headers["X-API-Key"] = API_KEY
-        headers["User-Agent"] = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        )
         return headers
 
     async def download_file(
@@ -88,11 +84,7 @@ class HttpxClient:
                 if file_path is None:
                     cd = response.headers.get("Content-Disposition", "")
                     match = re.search(r'filename="?([^"]+)"?', cd)
-                    filename = (
-                        unquote(match[1])
-                        if match
-                        else (Path(url).name or uuid.uuid4().hex)
-                    )
+                    filename = unquote(match[1]) if match else (Path(url).name or uuid.uuid4().hex)
                     path = Path(DOWNLOADS_DIR) / filename
                 else:
                     path = Path(file_path) if isinstance(file_path, str) else file_path
@@ -124,57 +116,42 @@ class HttpxClient:
             return None
 
         headers = self._get_headers(url, kwargs.pop("headers", {}))
-        params = kwargs.pop("params", None)
         for attempt in range(max_retries):
             try:
                 start = time.monotonic()
-                response = await self._session.get(
-                    url, headers=headers, params=params, **kwargs
-                )
+                response = await self._session.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
-
+                duration = time.monotonic() - start
+                LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
+                
                 # Parse JSON response
                 try:
-                    result = response.json()  # Remove await here
-                    if not isinstance(result, dict):
-                        error_msg = f"Invalid JSON response from {url}: Expected dict, got {type(result)}"
+                    json_response = response.json()
+                    if not isinstance(json_response, dict):
+                        error_msg = f"Invalid JSON response format from {url}: Expected dict, got {type(json_response)}"
                         LOGGER(__name__).error(error_msg)
                         return None
+                    if "cdnurl" not in json_response:
+                        error_msg = f"Missing 'cdnurl' in API response from {url}: {json_response}"
+                        LOGGER(__name__).error(error_msg)
+                        return None
+                    return json_response
                 except ValueError as e:
-                    error_msg = f"Invalid JSON response from {url}: {repr(e)}. Response body: {response.text}"
+                    error_msg = f"Invalid JSON response from {url}: {repr(e)}"
                     LOGGER(__name__).error(error_msg)
                     return None
-
-                # Handle fallback API response specifically
-                if url.startswith("https://ar-api-iauy.onrender.com/mp3youtube"):
-                    if (
-                        not isinstance(result, dict)
-                        or result.get("status") != 200
-                        or result.get("successful") != "success"
-                    ):
-                        error_msg = f"Fallback API error for {url}: {result.get('message', 'Unknown error')}"
-                        LOGGER(__name__).warning(error_msg)
-                        if attempt == max_retries - 1:
-                            LOGGER(__name__).error(error_msg)
-                            return None
-                        await asyncio.sleep(backoff_factor * (2 ** attempt))
-                        continue
-
-                duration = time.monotonic() - start
-                LOGGER(__name__).debug(
-                    "Request to %s succeeded in %.2fs", url, duration
-                )
-                return result
 
             except httpx.HTTPStatusError as e:
                 try:
                     error_response = e.response.json()
-                    if isinstance(error_response, dict) and "error" in error_response:
-                        error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
-                    else:
-                        error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
-                except Exception:
+                    error_msg = (
+                        f"API Error {e.response.status_code} for {url}: {error_response.get('error', e.response.text)}"
+                        if isinstance(error_response, dict)
+                        else f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                    )
+                except ValueError:
                     error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+
                 LOGGER(__name__).warning(error_msg)
                 if attempt == max_retries - 1:
                     LOGGER(__name__).error(error_msg)
@@ -211,11 +188,13 @@ class HttpxClient:
         elif isinstance(e, httpx.HTTPStatusError):
             try:
                 error_response = e.response.json()
-                if isinstance(error_response, dict) and "error" in error_response:
-                    return f"HTTP error {e.response.status_code} for {url}: {error_response['error']}"
+                return (
+                    f"HTTP error {e.response.status_code} for {url}: {error_response.get('error', e.response.text)}"
+                    if isinstance(error_response, dict)
+                    else f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                )
             except ValueError:
-                pass
-            return f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
+                return f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
         elif isinstance(e, httpx.ReadTimeout):
             return f"Read timeout for {url}: {repr(e)}"
         elif isinstance(e, httpx.RequestError):
