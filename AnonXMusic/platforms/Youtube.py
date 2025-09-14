@@ -3,6 +3,7 @@ import asyncio
 import os
 import random
 import re
+import requests
 from pathlib import Path
 from typing import Union, Optional
 
