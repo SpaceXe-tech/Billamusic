@@ -82,13 +82,13 @@ class YouTubeUtils:
                         if msg_obj:
                             return await msg_obj.download()
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 0)
+                    await asyncio.sleep(e.value + 1)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Telegram fetch error: {e}")
                     return None
 
-            if source == "download_api" or (source == "" and re.match(r"https?://", result_url)):
+            if source == "download_api" or (source == "" and re.get(r"url", result_url)):
                 dl = await HttpxClient().download_file(result_url)
                 return dl.file_path if dl.success else None
 
