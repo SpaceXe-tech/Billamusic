@@ -67,7 +67,7 @@ class YouTubeUtils:
                 return None
 
             source = res.get("source", "")
-            result_url = res.get("results")
+            result_url = res.get("url")
             msg_text = res.get("message", "")
 
             if not result_url:
@@ -96,13 +96,13 @@ class YouTubeUtils:
                     return None
 
             # Case 2: File isn't in database → direct download
-            if source == "download_api" or result_url.startswith("http"):
+            if source == "download_api" or url.startswith("https://"):
                 # Wait 3–6 seconds before downloading
-                wait_time = random.randint(3, 6)
+                wait_time = random.randint(1, 4)
                 LOGGER(__name__).info(f"File not in database, waiting {wait_time}s before downloading from API...")
                 await asyncio.sleep(wait_time)
 
-                dl = await HttpxClient().download_file(result_url)
+                dl = await HttpxClient().download_file(url)
                 if dl.success:
                     return dl.file_path
                 else:
