@@ -46,6 +46,7 @@ class YouTubeUtils:
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
         Download audio/video using the API.
+        Handles both public and private Telegram channel links.
         Waits 3–6 seconds if file isn't in database before attempting direct download.
         """
         if not API_URL or not API_KEY:
@@ -73,17 +74,22 @@ class YouTubeUtils:
                 LOGGER(__name__).error(f"No 'results' in API response. Message: {msg_text}")
                 return None
 
-            # Case 1: Video exists in database (Telegram message)
-            if source == "database" and re.match(r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url):
+            # Case 1: Video exists in database (Telegram message) - Handle public/private links
+            if source == "database" and re.match(r"https:\/\/t\.me\/(?:c\/)?([a-zA-Z0-9_-]+)\/(\d+)", result_url):
+                match = re.match(r"https:\/\/t\.me\/(?:c\/)?([a-zA-Z0-9_-]+)\/(\d+)", result_url)
+                chat_part, msg_id = match.groups()
                 try:
-                    chat_username, msg_id = re.match(
-                        r"https:\/\/t\.me\/([a-zA-Z0-9_]{5,})\/(\d+)", result_url
-                    ).groups()
-                    msg_obj = await app.get_messages(chat_username, int(msg_id))
+                    if chat_part.startswith("c/"):  # Private channel: Convert to numeric chat_id
+                        channel_id = chat_part.split('/')[-1]  # Extract the numeric part after 'c/'
+                        chat_id = int(f"-100{channel_id}")
+                    else:  # Public channel: Use username
+                        chat_id = chat_part
+                    
+                    msg_obj = await app.get_messages(chat_id, int(msg_id))
                     if msg_obj:
                         return await msg_obj.download()
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
+                    await asyncio.sleep(e.value + 0)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Telegram fetch error: {e}")
@@ -352,37 +358,53 @@ class YouTubeAPI:
             link = self.base + link
         loop = asyncio.get_running_loop()
 
+        def is_restricted() -> bool:
+            cookie_file = YouTubeUtils.get_cookie_file()
+            return bool(cookie_file and os.path.exists(cookie_file))
+
+        common_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": False,
+            "geo_bypass": True,
+            "geo_bypass_country": "IN",
+            "concurrent_fragment_downloads": 8,
+            "cookiefile": YouTubeUtils.get_cookie_file() if is_restricted() else None,
+        }
+
         def audio_dl():
-            ydl_optssx = {
-                "format": "bestaudio/best",
+            opts = {
+                **common_opts,
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
-                "no_warnings": True,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
-            info = x.extract_info(link, False)
-            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            x = yt_dlp.YoutubeDL(opts)
+            info = x.extract_info(link, download=False)
+            xyz = os.path.join("downloads", f"{info['id']}.mp3")
             if os.path.exists(xyz):
                 return xyz
             x.download([link])
             return xyz
 
         def video_dl():
-            ydl_optssx = {
-                "format": "(bestvideo[height<=?720][width<=?1280][ext=mp4])+(bestaudio[ext=m4a])",
+            format_str = "best[height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+            if format_id:
+                format_str = format_id
+            opts = {
+                **common_opts,
+                "format": format_str,
                 "outtmpl": "downloads/%(id)s.%(ext)s",
-                "geo_bypass": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
+                "merge_output_format": "mp4",
+                "prefer_ffmpeg": True,
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
-            info = x.extract_info(link, False)
-            xyz = os.path.join("downloads", f"{info['id']}.{info['ext']}")
+            x = yt_dlp.YoutubeDL(opts)
+            info = x.extract_info(link, download=False)
+            xyz = os.path.join("downloads", f"{info['id']}.mp4")
             if os.path.exists(xyz):
                 return xyz
             x.download([link])
@@ -391,41 +413,33 @@ class YouTubeAPI:
         def song_video_dl():
             formats = f"{format_id}+140"
             fpath = f"downloads/{title}"
-            ydl_optssx = {
+            opts = {
+                **common_opts,
                 "format": formats,
                 "outtmpl": fpath,
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
-                "quiet": True,
-                "no_warnings": True,
-                "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
+                "prefer_ffmpeg": True,
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
+            x = yt_dlp.YoutubeDL(opts)
             x.download([link])
+            return f"{fpath}.mp4"
 
         def song_audio_dl():
             fpath = f"downloads/{title}.%(ext)s"
-            ydl_optssx = {
+            opts = {
+                **common_opts,
                 "format": format_id,
                 "outtmpl": fpath,
-                "geo_bypass": True,
-                "nocheckcertificate": True,
-                "quiet": True,
-                "no_warnings": True,
-                "cookiefile": YouTubeUtils.get_cookie_file(),
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
                 "prefer_ffmpeg": True,
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }
-                ],
             }
-            x = yt_dlp.YoutubeDL(ydl_optssx)
+            x = yt_dlp.YoutubeDL(opts)
             x.download([link])
+            return f"{fpath.split('%(ext)s')[0]}.mp3"
 
         if songvideo:
             if dl := await YouTubeUtils.download_with_api(link, True):
