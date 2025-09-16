@@ -595,9 +595,9 @@ class Call(PyTgCalls):
                             user,
                         )
                         if apple_metadata.get("apple_artist"):
-                            caption += f"\n🎵 **Artist:** {apple_metadata['apple_artist']}"
+                            caption += f"\n🎵 Artist: {apple_metadata['apple_artist']}"
                         if apple_metadata.get("apple_album"):
-                            caption += f"\n💿 **Album:** {apple_metadata['apple_album']}"
+                            caption += f"\n💿 Album: {apple_metadata['apple_album']}"
                     else:
                         caption = _["stream_1"].format(
                             f"https://t.me/{app.username}?start=info_{videoid}",
