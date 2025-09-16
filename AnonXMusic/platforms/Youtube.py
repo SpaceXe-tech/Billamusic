@@ -3,9 +3,10 @@ import os
 import random
 import re
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import yt_dlp
+from pyrogram import errors
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
@@ -69,7 +70,7 @@ async def shell_cmd(cmd: str) -> str:
 class YouTubeAPI:
     def __init__(self):
         self.base = "https://www.youtube.com/watch?v="
-        self.regex = r"(?:youtube\.com|youtu\.be)"
+        self.regex = r"(?:youtube\.com|youtu\.be|music\.youtube\.com)"
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
         self.reg = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -179,8 +180,10 @@ class YouTubeAPI:
             link = self.listbase + link
         if "&" in link:
             link = link.split("&")[0]
+        if "music.youtube.com" in link:
+            link = link.replace("music.youtube.com", "www.youtube.com")
         playlist = await shell_cmd(
-            f"yt-dlp -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
+            f"yt-dlp --cookies {YouTubeUtils.get_cookie_file()} -i --get-id --flat-playlist --playlist-end {limit} --skip-download {link}"
         )
         try:
             result = playlist.split("\n")
@@ -276,9 +279,25 @@ class YouTubeAPI:
         songvideo: Union[bool, str] = None,
         format_id: Union[bool, str] = None,
         title: Union[bool, str] = None,
-    ) -> str:
+    ) -> Union[str, List[str], Tuple[str, bool], Tuple[List[str], bool]]:
         if videoid:
             link = self.base + link
+        if "playlist?list=" in link or "music.youtube.com" in link:
+            return await self._download_playlist(link, mystic, video, songaudio, songvideo, format_id, title)
+        else:
+            return await self._download_single(link, mystic, video, videoid, songaudio, songvideo, format_id, title)
+
+    async def _download_single(
+        self,
+        link: str,
+        mystic,
+        video: Union[bool, str] = None,
+        videoid: Union[bool, str] = None,
+        songaudio: Union[bool, str] = None,
+        songvideo: Union[bool, str] = None,
+        format_id: Union[bool, str] = None,
+        title: Union[bool, str] = None,
+    ) -> Union[str, Tuple[str, bool]]:
         loop = asyncio.get_running_loop()
 
         def is_restricted() -> bool:
@@ -288,7 +307,7 @@ class YouTubeAPI:
         common_opts = {
             "quiet": True,
             "no_warnings": True,
-            "noplaylist": False,
+            "noplaylist": True,  # Ensure single item
             "geo_bypass": True,
             "geo_bypass_country": "IN",
             "concurrent_fragment_downloads": 8,
@@ -365,13 +384,11 @@ class YouTubeAPI:
             return f"{fpath.split('%(ext)s')[0]}.mp3"
 
         if songvideo:
-            await loop.run_in_executor(None, song_video_dl)
-            fpath = f"downloads/{title}.mp4"
-            return fpath
+            downloaded_file = await loop.run_in_executor(None, song_video_dl)
+            direct = True
         elif songaudio:
-            await loop.run_in_executor(None, song_audio_dl)
-            fpath = f"downloads/{title}.mp3"
-            return fpath
+            downloaded_file = await loop.run_in_executor(None, song_audio_dl)
+            direct = True
         elif video:
             if await is_on_off(1):
                 direct = True
@@ -396,4 +413,68 @@ class YouTubeAPI:
         else:
             direct = True
             downloaded_file = await loop.run_in_executor(None, audio_dl)
+        return downloaded_file, direct
+
+    async def _download_playlist(
+        self,
+        link: str,
+        mystic,
+        video: Union[bool, str] = None,
+        songaudio: Union[bool, str] = None,
+        songvideo: Union[bool, str] = None,
+        format_id: Union[bool, str] = None,
+        title: Union[bool, str] = None,
+    ) -> Union[List[str], Tuple[List[str], bool]]:
+        if "music.youtube.com" in link:
+            link = link.replace("music.youtube.com", "www.youtube.com")
+        loop = asyncio.get_running_loop()
+
+        def is_restricted() -> bool:
+            cookie_file = YouTubeUtils.get_cookie_file()
+            return bool(cookie_file and os.path.exists(cookie_file))
+
+        common_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": False,
+            "geo_bypass": True,
+            "geo_bypass_country": "IN",
+            "concurrent_fragment_downloads": 8,
+            "cookiefile": YouTubeUtils.get_cookie_file() if is_restricted() else None,
+        }
+
+        def playlist_dl(is_video: bool = False):
+            format_str = "bestaudio[ext=m4a]/bestaudio/best" if not is_video else "best[height<=720]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+            postprocessors = [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}] if not is_video else []
+            merge_format = None if not is_video else "mp4"
+            outtmpl = "downloads/%(playlist)s/%(id)s.%(ext)s"
+            opts = {
+                **common_opts,
+                "format": format_str,
+                "outtmpl": outtmpl,
+                "postprocessors": postprocessors,
+                "merge_output_format": merge_format,
+                "prefer_ffmpeg": True,
+            }
+            x = yt_dlp.YoutubeDL(opts)
+            info = x.extract_info(link, download=False)
+            paths = []
+            x.download([link])
+            for entry in info.get("entries", []):
+                vid = entry.get("id")
+                for root, dirs, files in os.walk("downloads"):
+                    for file in files:
+                        if file.startswith(vid):
+                            paths.append(os.path.join(root, file))
+            return paths
+
+        if songvideo or video:
+            downloaded_file = await loop.run_in_executor(None, lambda: playlist_dl(True))
+            direct = True if await is_on_off(1) else None
+        elif songaudio:
+            downloaded_file = await loop.run_in_executor(None, lambda: playlist_dl(False))
+            direct = True
+        else:
+            downloaded_file = await loop.run_in_executor(None, lambda: playlist_dl(False))
+            direct = True
         return downloaded_file, direct
