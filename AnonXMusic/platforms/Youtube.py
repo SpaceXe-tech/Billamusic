@@ -6,22 +6,21 @@ from pathlib import Path
 from typing import Optional, Union
 
 import yt_dlp
-from pyrogram import errors
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
 
 from AnonXMusic.logging import LOGGER
-from AnonXMusic.platforms._httpx import HttpxClient
 from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
-from config import API_URL, API_KEY
 
 
 class YouTubeUtils:
+    cookie_index = 0
+
     @staticmethod
     def get_cookie_file() -> Optional[str]:
-        """Get a random cookie file from the 'cookies' directory, skipping 'cookie_time.txt'."""
+        """Get the next cookie file from the 'cookies' directory in a cycle, skipping 'cookie_time.txt'."""
         cookie_dir = "AnonXMusic/assets"
         try:
             if not os.path.exists(cookie_dir):
@@ -35,85 +34,13 @@ class YouTubeUtils:
                 LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
                 return None
 
-            random_file = random.choice(cookies_files)
-            return os.path.join(cookie_dir, random_file)
+            # Cycle through the list
+            selected_file = cookies_files[YouTubeUtils.cookie_index % len(cookies_files)]
+            YouTubeUtils.cookie_index += 1
+            return os.path.join(cookie_dir, selected_file)
 
         except Exception as e:
             LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
-            return None
-
-    @staticmethod
-    async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
-        """
-        Download audio/video using the API.
-        Handles both public and private Telegram channel links.
-        Waits 3–6 seconds if file isn't in database before attempting direct download.
-        """
-        if not API_URL or not API_KEY:
-            LOGGER(__name__).warning("API_URL or API_KEY is None")
-            return None
-        if not video_id:
-            LOGGER(__name__).warning("Video ID is None")
-            return None
-
-        try:
-            from AnonXMusic import app  # Local import to avoid circular dependency
-
-            api_url = f"{API_URL}?api_key={API_KEY}&id={video_id}"
-            res = await HttpxClient().make_request(api_url)
-
-            if not res:
-                LOGGER(__name__).error("API response empty")
-                return None
-
-            source = res.get("source", "")
-            result_url = res.get("results")
-            msg_text = res.get("message", "")
-
-            if not result_url:
-                LOGGER(__name__).error(f"No 'results' in API response. Message: {msg_text}")
-                return None
-
-            # Case 1: Video exists in database (Telegram message) - Handle public/private links
-            if source == "database" and re.match(r"https:\/\/t\.me\/(?:c\/)?([a-zA-Z0-9_-]+)\/(\d+)", result_url):
-                match = re.match(r"https:\/\/t\.me\/(?:c\/)?([a-zA-Z0-9_-]+)\/(\d+)", result_url)
-                chat_part, msg_id = match.groups()
-                try:
-                    if chat_part.startswith("c/"):  # Private channel: Convert to numeric chat_id
-                        channel_id = chat_part.split('/')[-1]  # Extract the numeric part after 'c/'
-                        chat_id = int(f"-100{channel_id}")
-                    else:  # Public channel: Use username
-                        chat_id = chat_part
-                    
-                    msg_obj = await app.get_messages(chat_id, int(msg_id))
-                    if msg_obj:
-                        return await msg_obj.download()
-                except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 0)
-                    return await YouTubeUtils.download_with_api(video_id, is_video)
-                except Exception as e:
-                    LOGGER(__name__).error(f"Telegram fetch error: {e}")
-                    return None
-
-            # Case 2: File isn't in database → direct download
-            if source == "download_api" or result_url.startswith("https://"):
-                # Wait 3–6 seconds before downloading
-                wait_time = random.randint(1, 3)
-                LOGGER(__name__).info(f"File not in database, waiting {wait_time}s before downloading from API...")
-                await asyncio.sleep(wait_time)
-
-                dl = await HttpxClient().download_file(result_url)
-                if dl.success:
-                    return dl.file_path
-                else:
-                    LOGGER(__name__).error(f"Download failed for URL: {result_url}")
-                    return None
-
-            LOGGER(__name__).error(f"Unsupported API source or invalid URL: {source}, {result_url}")
-            return None
-
-        except Exception as e:
-            LOGGER(__name__).error(f"API error: {e}")
             return None
 
 
@@ -137,7 +64,6 @@ async def shell_cmd(cmd: str) -> str:
             return out.decode("utf-8")
         return error_str
     return out.decode("utf-8")
-
 
 
 class YouTubeAPI:
@@ -228,9 +154,6 @@ class YouTubeAPI:
         return thumbnail
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
-        if dl := await YouTubeUtils.download_with_api(link, True):
-            return True, str(dl)
-
         if videoid:
             link = self.base + link
         if "&" in link:
@@ -442,15 +365,10 @@ class YouTubeAPI:
             return f"{fpath.split('%(ext)s')[0]}.mp3"
 
         if songvideo:
-            if dl := await YouTubeUtils.download_with_api(link, True):
-                return str(dl)
-
             await loop.run_in_executor(None, song_video_dl)
             fpath = f"downloads/{title}.mp4"
             return fpath
         elif songaudio:
-            if dl := await YouTubeUtils.download_with_api(link):
-                return str(dl)
             await loop.run_in_executor(None, song_audio_dl)
             fpath = f"downloads/{title}.mp3"
             return fpath
@@ -459,9 +377,6 @@ class YouTubeAPI:
                 direct = True
                 downloaded_file = await loop.run_in_executor(None, video_dl)
             else:
-                if dl := await YouTubeUtils.download_with_api(link, True):
-                    return str(dl), direct
-
                 proc = await asyncio.create_subprocess_exec(
                     "yt-dlp",
                     "--cookies", YouTubeUtils.get_cookie_file(),
@@ -480,7 +395,5 @@ class YouTubeAPI:
                     return
         else:
             direct = True
-            if dl := await YouTubeUtils.download_with_api(link):
-                return str(dl), direct
             downloaded_file = await loop.run_in_executor(None, audio_dl)
         return downloaded_file, direct
