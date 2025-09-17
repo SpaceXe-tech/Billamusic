@@ -2,6 +2,8 @@
 
 import re
 import aiohttp
+import unicodedata
+from langdetect import detect
 from pyrogram import filters
 from pyrogram.types import (
     InlineKeyboardMarkup,
@@ -13,10 +15,49 @@ from pyrogram.types import (
 from AnonXMusic import app
 
 # Base iTunes API
-ITUNES_API = "https://itunes.apple.com/search?term={}&entity={}&limit=5"
+ITUNES_API = "https://itunes.apple.com/search?term={}&entity={}&limit=5&country={}"
 
 # Regex to detect Apple Music links
 APPLE_REGEX = r"^https:\/\/music\.apple\.com\/[a-z]{2}\/(album|playlist|artist|song)\/[^\s\/]+\/(\d+)"
+
+
+# --------------------------
+# Helpers
+# --------------------------
+def normalize_query(query: str) -> str:
+    """Clean & normalize query (remove repeats, accents, lowercasing)."""
+    query = unicodedata.normalize("NFKD", query).encode("ascii", "ignore").decode("utf-8")
+    query = query.lower()
+    words = query.split()
+    cleaned = []
+    for w in words:
+        if not cleaned or cleaned[-1] != w:
+            cleaned.append(w)
+    return " ".join(cleaned)
+
+
+def detect_country(query: str) -> str:
+    """Detect language and map to iTunes country code."""
+    try:
+        lang = detect(query)
+    except Exception:
+        return "in"
+
+    mapping = {
+        "hi": "in",  # Hindi → India
+        "bn": "in",  # Bengali → India
+        "ur": "in",  # Urdu → India
+        "en": "us",  # English → US
+        "es": "es",  # Spanish → Spain
+        "fr": "fr",  # French → France
+        "de": "de",  # German → Germany
+        "ja": "jp",  # Japanese → Japan
+        "ko": "kr",  # Korean → Korea
+        "zh-cn": "cn",  # Simplified Chinese
+        "zh-tw": "tw",  # Traditional Chinese
+    }
+
+    return mapping.get(lang, "us")
 
 
 async def fetch_json(url: str) -> dict:
@@ -30,12 +71,12 @@ async def fetch_json(url: str) -> dict:
         return {}
 
 
-async def search_itunes(query: str, entity: str):
-    url = ITUNES_API.format(query.replace(" ", "+"), entity)
+async def search_itunes(query: str, entity: str, country: str):
+    url = ITUNES_API.format(query.replace(" ", "+"), entity, country)
     return await fetch_json(url)
 
 
-async def parse_results(data: dict, entity: str):
+async def parse_results(data: dict, entity: str, country: str):
     results = []
     for item in data.get("results", []):
         title = item.get("trackName") or item.get("collectionName") or item.get("artistName")
@@ -43,7 +84,6 @@ async def parse_results(data: dict, entity: str):
         collection = item.get("collectionName")
         thumb = item.get("artworkUrl100")
         track_id = item.get("trackId") or item.get("collectionId") or item.get("artistId")
-        country = item.get("country", "us").lower()
 
         if not track_id or not title:
             continue
@@ -68,6 +108,9 @@ async def parse_results(data: dict, entity: str):
     return results
 
 
+# --------------------------
+# Command handler
+# --------------------------
 @app.on_message(filters.command(["aplay"]))
 async def aplay_handler(client, message):
     if len(message.command) < 2:
@@ -76,8 +119,11 @@ async def aplay_handler(client, message):
             quote=True,
         )
 
-    query = " ".join(message.command[1:])
-    m = await message.reply_text("🔎 Searching Apple Music...", quote=True)
+    raw_query = " ".join(message.command[1:])
+    query = normalize_query(raw_query)
+    country = detect_country(raw_query)
+
+    m = await message.reply_text(f"🔎 Searching Apple Music ({country.upper()})...", quote=True)
 
     # Direct Apple Music link
     if re.match(APPLE_REGEX, query):
@@ -85,31 +131,42 @@ async def aplay_handler(client, message):
 
     results = []
     try:
-        for entity in ["song", "album", "artist", "playlist"]:
-            data = await search_itunes(query, entity)
-            if data and data.get("resultCount", 0) > 0:
-                results = await parse_results(data, entity)
+        # Fallback search strategy
+        attempts = [query]
+
+        if len(query.split()) > 3:
+            attempts.append(" ".join(query.split()[:3]))
+        attempts.append(query.split()[0])
+
+        for q in attempts:
+            for entity in ["song", "album", "artist", "playlist"]:
+                data = await search_itunes(q, entity, country)
+                if data and data.get("resultCount", 0) > 0:
+                    results = await parse_results(data, entity, country)
+                    if results:
+                        break
+            if results:
                 break
     except Exception as e:
         return await m.edit(f"❌ Error while searching: {e}")
 
     if not results:
-        return await m.edit("⚠️ No results found on Apple Music.")
+        return await m.edit("⚠️ No results found on Apple Music. Try a simpler search.")
 
-    # Build buttons with callback_data
+    # Build buttons
     buttons, row = [], []
     for i, track in enumerate(results[:5], start=1):
         text = track["title"]
         if len(text) > 25:
             text = text[:22] + "..."
-        row.append(InlineKeyboardButton(text=text, callback_data=f"apple:{i-1}:{query}"))
+        row.append(InlineKeyboardButton(text=text, callback_data=f"apple:{i-1}:{query}:{country}"))
         if len(row) == 3:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
 
-    text = f"🎵 Results for {query} on Apple Music:\n\n"
+    text = f"🎵 Results for **{raw_query}** on Apple Music ({country.upper()}):\n\n"
     for i, track in enumerate(results[:5], start=1):
         text += f"{i}. {track['title']}\n"
 
@@ -120,16 +177,20 @@ async def aplay_handler(client, message):
     )
 
 
-@app.on_callback_query(filters.regex(r"^apple:(\d+):(.+)"))
+# --------------------------
+# Callback handler
+# --------------------------
+@app.on_callback_query(filters.regex(r"^apple:(\d+):(.+):([a-z]{2})"))
 async def apple_callback(client, callback_query: CallbackQuery):
     index = int(callback_query.matches[0].group(1))
     query = callback_query.matches[0].group(2)
+    country = callback_query.matches[0].group(3)
 
     results = []
     for entity in ["song", "album", "artist", "playlist"]:
-        data = await search_itunes(query, entity)
+        data = await search_itunes(query, entity, country)
         if data and data.get("resultCount", 0) > 0:
-            results = await parse_results(data, entity)
+            results = await parse_results(data, entity, country)
             break
 
     if not results or index >= len(results):
@@ -140,7 +201,7 @@ async def apple_callback(client, callback_query: CallbackQuery):
         f"🎶 {track['title']}\n"
         f"👤 Artist: {track.get('artist','N/A')}\n"
         f"💽 Album: {track.get('album','N/A')}\n\n"
-        f"🔗 [Open in Apple Music]({track['url']})"
+        f"🍎 [Open in Apple Music]({track['url']})"
     )
 
     if track.get("thumb"):
@@ -157,4 +218,4 @@ async def apple_callback(client, callback_query: CallbackQuery):
                 [[InlineKeyboardButton("🔗 Open in Apple Music", url=track["url"])]]
             ),
             disable_web_page_preview=True,
-)
+        )
