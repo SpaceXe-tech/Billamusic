@@ -57,7 +57,7 @@ def detect_country(query: str) -> str:
         "zh-tw": "tw",  # Traditional Chinese
     }
 
-    return mapping.get(lang, "us")
+    return mapping.get(lang, "in")
 
 
 async def fetch_json(url: str) -> dict:
