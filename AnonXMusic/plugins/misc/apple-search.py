@@ -1,7 +1,6 @@
 import re
 import aiohttp
 import unicodedata
-from langdetect import detect
 from pyrogram import filters
 from pyrogram.types import (
     InlineKeyboardMarkup,
@@ -13,7 +12,7 @@ from pyrogram.types import (
 from AnonXMusic import app
 
 # Base iTunes API
-ITUNES_API = "https://itunes.apple.com/search?term={}&entity={}&limit=4&country={}"
+ITUNES_API = "https://itunes.apple.com/search?term={}&entity={}&limit=5&country={}"
 
 # Regex to detect Apple Music links
 APPLE_REGEX = r"^https:\/\/music\.apple\.com\/[a-z]{2}\/(album|playlist|artist|song)\/[^\s\/]+\/(\d+)"
@@ -36,30 +35,6 @@ def normalize_query(query: str) -> str:
         if not cleaned or cleaned[-1] != w:
             cleaned.append(w)
     return " ".join(cleaned)
-
-
-def detect_country(query: str) -> str:
-    """Detect language and map to iTunes country code."""
-    try:
-        lang = detect(query)
-    except Exception:
-        return "in"
-
-    mapping = {
-        "hi": "in",  # Hindi → India
-        "bn": "in",  # Bengali → India
-        "ur": "in",  # Urdu → India
-        "en": "us",  # English → US
-        "es": "es",  # Spanish → Spain
-        "fr": "fr",  # French → France
-        "de": "de",  # German → Germany
-        "ja": "jp",  # Japanese → Japan
-        "ko": "kr",  # Korean → Korea
-        "zh-cn": "cn",  # Simplified Chinese
-        "zh-tw": "tw",  # Traditional Chinese
-    }
-
-    return mapping.get(lang, "in")
 
 
 async def fetch_json(url: str) -> dict:
@@ -127,9 +102,9 @@ async def aplay_handler(client, message):
 
     raw_query = " ".join(message.command[1:])
     query = normalize_query(raw_query)
-    country = detect_country(raw_query)
+    country = "us"  # Default to US catalog
 
-    m = await message.reply_text(f"🔎 Searching Apple Music ({country.upper()})...", quote=True)
+    m = await message.reply_text(f"🔎 Searching Apple Music (US)...", quote=True)
 
     # Direct Apple Music link
     if re.match(APPLE_REGEX, query):
@@ -146,7 +121,7 @@ async def aplay_handler(client, message):
             attempts.append(" ".join(words[:2]))
         attempts.append(words[0])
 
-        # Try initial country
+        # Search in US catalog
         for q in attempts:
             for entity in ["song", "album", "artist", "playlist"]:
                 data = await search_itunes(q, entity, country)
@@ -156,20 +131,6 @@ async def aplay_handler(client, message):
                         break
             if results:
                 break
-
-        # Fallback to US if no results
-        if not results and country != "us":
-            await m.edit(f"🔎 No results in {country.upper()}. Trying US...")
-            for q in attempts:
-                for entity in ["song", "album", "artist", "playlist"]:
-                    data = await search_itunes(q, entity, "us")
-                    if data and data.get("resultCount", 0) > 0:
-                        results = await parse_results(data, entity, "us")
-                        country = "us"  # Update country for callback
-                        if results:
-                            break
-                if results:
-                    break
 
     except Exception as e:
         return await m.edit(f"❌ Error while searching: {str(e)}")
@@ -192,7 +153,7 @@ async def aplay_handler(client, message):
     if row:
         buttons.append(row)
 
-    text = f"🎵 Results for **{raw_query}** on Apple Music ({country.upper()}):\n\n"
+    text = f"🎵 Results for **{raw_query}** on Apple Music (US):\n\n"
     for i, track in enumerate(results[:5], start=1):
         text += f"{i}. {track['title']}\n"
 
