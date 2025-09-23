@@ -439,7 +439,7 @@ class YouTubeAPI:
             "noplaylist": False,
             "geo_bypass": True,
             "geo_bypass_country": "IN",
-            "concurrent_fragment_downloads": 8,
+            "concurrent_fragment_downloads": 50,
             "cookiefile": YouTubeUtils.get_cookie_file() if is_restricted() else None,
         }
 
