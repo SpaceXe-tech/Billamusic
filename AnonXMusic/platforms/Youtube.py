@@ -310,14 +310,14 @@ class YouTubeAPI:
             "noplaylist": True,  # Ensure single item
             "geo_bypass": True,
             "geo_bypass_country": "IN",
-            "concurrent_fragment_downloads": 8,
+            "concurrent_fragment_downloads": 16,
             "cookiefile": YouTubeUtils.get_cookie_file() if is_restricted() else None,
         }
 
         def audio_dl():
             opts = {
                 **common_opts,
-                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "format": "bestaudio[ext=webm]/bestaudio/best",
                 "outtmpl": "downloads/%(id)s.%(ext)s",
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
@@ -327,7 +327,7 @@ class YouTubeAPI:
             }
             x = yt_dlp.YoutubeDL(opts)
             info = x.extract_info(link, download=False)
-            xyz = os.path.join("downloads", f"{info['id']}.mp3")
+            xyz = os.path.join("downloads", f"{info['id']}.webm")
             if os.path.exists(xyz):
                 return xyz
             x.download([link])
