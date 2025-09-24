@@ -1,12 +1,13 @@
 import os
 import time
+import json
 import asyncio
 import aiohttp
 
 from config import COOKIE_URL
 
 COOKIE_PATH = "AnonXMusic/assets/cookies.txt"
-TIMESTAMP_PATH = "AnonXMusic/assets/cookie_time.txt"
+TIMESTAMP_PATH = "AnonXMusic/assets/cookie_time.json"
 REFRESH_INTERVAL = 72 * 60 * 60  # 72 hours
 
 
@@ -26,18 +27,20 @@ def _needs_refresh() -> bool:
     if not os.path.exists(TIMESTAMP_PATH):
         return True
     try:
-        with open(TIMESTAMP_PATH, "r") as f:
-            last_refresh = float(f.read().strip())
+        with open(TIMESTAMP_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        last_refresh = float(data.get("last_refresh", 0))
     except Exception:
         return True
     return (time.time() - last_refresh) >= REFRESH_INTERVAL
 
 
 def _update_refresh_time():
-    """Update timestamp file."""
+    """Update timestamp JSON file."""
     try:
-        with open(TIMESTAMP_PATH, "w") as f:
-            f.write(str(time.time()))
+        data = {"last_refresh": time.time()}
+        with open(TIMESTAMP_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f)
     except:
         pass
 
