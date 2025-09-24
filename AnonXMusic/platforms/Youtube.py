@@ -55,13 +55,10 @@ class YouTubeUtils:
             return None
 
         from AnonXMusic import app
-
         # Extract video ID if a full YouTube URL is provided
         if "youtube.com" in video_id or "youtu.be" in video_id:
             import re
-            match = re.search(
-                r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id
-            )
+            match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
             if match:
                 video_id = match.group(1)
             else:
@@ -71,7 +68,16 @@ class YouTubeUtils:
         video_id = video_id.strip()
         api_url = f"{API_URL}/yt?api_key={API_KEY}&id={video_id}"
 
-        get_track = await HttpxClient().make_request(api_url)
+        try:
+            # Wait up to 10 seconds for API response
+            get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=10)
+        except asyncio.TimeoutError:
+            LOGGER(__name__).error("API request timed out after 10 seconds")
+            return None
+        except Exception as e:
+            LOGGER(__name__).error(f"Error during API request: {e}")
+            return None
+
         if not get_track:
             LOGGER(__name__).error("API response is empty")
             return None
