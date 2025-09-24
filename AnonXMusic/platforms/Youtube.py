@@ -17,12 +17,11 @@ from AnonXMusic.utils.database import is_on_off
 from AnonXMusic.utils.formatters import time_to_seconds
 from config import API_URL, API_KEY
 
-
 class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
-        """Get a random cookie file from the 'cookies' directory."""
-        cookie_dir = "assets/cookies"
+        """Get a random cookie file from the cookies directory."""
+        cookie_dir = "AnonXMusic/assets"
         try:
             if not os.path.exists(cookie_dir):
                 LOGGER(__name__).warning("Cookie directory '%s' does not exist.", cookie_dir)
@@ -45,7 +44,7 @@ class YouTubeUtils:
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
         Download using the external API (supports Telegram index + CDN fallback).
-        Accepts either full YouTube URL or raw video ID.
+        Accepts either full YouTube URL or raw video ID, managing response like the old class.
         """
         if not API_URL or not API_KEY:
             LOGGER(__name__).warning("API URL or KEY not set")
@@ -55,9 +54,8 @@ class YouTubeUtils:
             return None
 
         from AnonXMusic import app
-        # Extract video ID if a full YouTube URL is provided
-        if "youtube.com" in video_id or "youtu.be" in video_id:
-            import re
+        # Extracting video ID if a full YouTube URL is provided
+        if re.match(r"^https?://", video_id):
             match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
             if match:
                 video_id = match.group(1)
@@ -69,57 +67,57 @@ class YouTubeUtils:
         api_url = f"{API_URL}/yt?api_key={API_KEY}&id={video_id}"
 
         try:
-            # Wait up to 10 seconds for API response
+            # Wait up to 30 seconds for API response
             get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=30)
+            if not get_track:
+                LOGGER(__name__).error("API response is empty")
+                return None
+
+            # Handle response in a single pass, mimicking old class's direct processing
+            source = get_track.get("source")
+            data = get_track.get("data", {})
+
+            if source == "telegram_index":
+                telegram_url = data.get("telegram_url")
+                msg_id = data.get("message_id")
+                channel_id = data.get("channel")
+
+                if not telegram_url or not msg_id or not channel_id:
+                    LOGGER(__name__).error("Missing telegram index fields in API response")
+                    return None
+
+                try:
+                    msg = await app.get_messages(chat_id=channel_id, message_ids=msg_id)
+                    if not msg:
+                        LOGGER(__name__).error("Message not found in Telegram index")
+                        return None
+                    path = await msg.download()
+                    return Path(path) if path else None
+                except errors.FloodWait as e:
+                    await asyncio.sleep(e.value + 1)
+                    return await YouTubeUtils.download_with_api(video_id, is_video)
+                except Exception as e:
+                    LOGGER(__name__).error(f"Error fetching Telegram index message: {e}")
+                    return None
+
+            elif source == "download_api":
+                cdn_url = data.get("url")
+                if not cdn_url:
+                    LOGGER(__name__).error("CDN URL missing in download_api response")
+                    return None
+
+                dl = await HttpxClient().download_file(cdn_url)
+                return dl.file_path if dl and dl.success else None
+
+            LOGGER(__name__).warning("Unknown API source: %s", source)
+            return None
+
         except asyncio.TimeoutError:
-            LOGGER(__name__).error("API request timed out after 10 seconds")
+            LOGGER(__name__).error("API request timed out after 30 seconds")
             return None
         except Exception as e:
             LOGGER(__name__).error(f"Error during API request: {e}")
             return None
-
-        if not get_track:
-            LOGGER(__name__).error("API response is empty")
-            return None
-
-        source = get_track.get("source")
-        data = get_track.get("data", {})
-
-        if source == "telegram_index":
-            telegram_url = data.get("telegram_url")
-            msg_id = data.get("message_id")
-            channel_id = data.get("channel")
-
-            if not telegram_url or not msg_id or not channel_id:
-                LOGGER(__name__).error("Missing telegram index fields in API response")
-                return None
-
-            try:
-                msg = await app.get_messages(chat_id=channel_id, message_ids=msg_id)
-                if not msg:
-                    LOGGER(__name__).error("Message not found in Telegram index")
-                    return None
-                path = await msg.download()
-                return Path(path)
-            except errors.FloodWait as e:
-                await asyncio.sleep(e.value + 1)
-                return await YouTubeUtils.download_with_api(video_id, is_video)
-            except Exception as e:
-                LOGGER(__name__).error(f"Error fetching Telegram index message: {e}")
-                return None
-
-        elif source == "download_api":
-            cdn_url = data.get("url")
-            if not cdn_url:
-                LOGGER(__name__).error("CDN URL missing in download_api response")
-                return None
-
-            dl = await HttpxClient().download_file(cdn_url)
-            return dl.file_path if dl and dl.success else None
-
-        LOGGER(__name__).warning("Unknown API source: %s", source)
-        return None
-
 
 async def shell_cmd(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -134,7 +132,6 @@ async def shell_cmd(cmd):
         else:
             return errorz.decode("utf-8")
     return out.decode("utf-8")
-
 
 class YouTubeAPI:
     def __init__(self):
