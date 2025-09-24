@@ -22,7 +22,7 @@ class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
         """Get a random cookie file from the 'cookies' directory."""
-        cookie_dir = "cookies"
+        cookie_dir = "assets/cookies"
         try:
             if not os.path.exists(cookie_dir):
                 LOGGER(__name__).warning("Cookie directory '%s' does not exist.", cookie_dir)
@@ -70,7 +70,7 @@ class YouTubeUtils:
 
         try:
             # Wait up to 10 seconds for API response
-            get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=10)
+            get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=30)
         except asyncio.TimeoutError:
             LOGGER(__name__).error("API request timed out after 10 seconds")
             return None
