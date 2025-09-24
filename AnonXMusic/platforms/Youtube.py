@@ -45,6 +45,7 @@ class YouTubeUtils:
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
         Download using the external API (supports Telegram index + CDN fallback).
+        Accepts either full YouTube URL or raw video ID.
         """
         if not API_URL or not API_KEY:
             LOGGER(__name__).warning("API URL or KEY not set")
@@ -55,7 +56,18 @@ class YouTubeUtils:
 
         from AnonXMusic import app
 
-        # Accept both full URL and raw ID
+        # Extract video ID if a full YouTube URL is provided
+        if "youtube.com" in video_id or "youtu.be" in video_id:
+            import re
+            match = re.search(
+                r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id
+            )
+            if match:
+                video_id = match.group(1)
+            else:
+                LOGGER(__name__).warning("Could not extract video ID from URL")
+                return None
+
         video_id = video_id.strip()
         api_url = f"{API_URL}/yt?api_key={API_KEY}&id={video_id}"
 
@@ -90,7 +102,6 @@ class YouTubeUtils:
                 LOGGER(__name__).error(f"Error fetching Telegram index message: {e}")
                 return None
 
-        # --- Case 2: Direct Download (CDN) ---
         elif source == "download_api":
             cdn_url = data.get("url")
             if not cdn_url:
@@ -112,7 +123,7 @@ async def shell_cmd(cmd):
     )
     out, errorz = await proc.communicate()
     if errorz:
-        if "unavailable videos are hidden" in (error.decode("utf-8")).lower():
+        if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
             return out.decode("utf-8")
         else:
             return errorz.decode("utf-8")
