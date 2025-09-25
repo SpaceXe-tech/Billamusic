@@ -57,8 +57,8 @@ async def search_song(client, message):
         artist_names = ", ".join([a.get("name", "Uɴᴋɴᴏᴡɴ") for a in artists_data])
         song_name = song.get("name", "Uɴᴋɴᴏᴡɴ Sᴏɴɢ")
         callback_data = f"song_{i}_{message.from_user.id}"
-        buttons.append([InlineKeyboardButton(f"{song_name} - {artist_names}", callback_data=callback_data)])
-
+        #buttons.append([InlineKeyboardButton(f"{song_name} - {artist_names}", callback_data=callback_data)])
+        buttons.append([InlineKeyboardButton(f"{song_name}", callback_data=callback_data)])
         song_storage[callback_data] = song
 
     await message.reply_text(
