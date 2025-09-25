@@ -68,7 +68,7 @@ class YouTubeUtils:
 
         try:
             # Wait up to 30 seconds for API response
-            get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=30)
+            get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=20)
             if not get_track:
                 LOGGER(__name__).error("API response is empty")
                 return None
@@ -94,7 +94,7 @@ class YouTubeUtils:
                     path = await msg.download()
                     return Path(path) if path else None
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
+                    await asyncio.sleep(e.value + 0)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Error fetching Telegram index message: {e}")
