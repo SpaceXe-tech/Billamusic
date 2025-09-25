@@ -62,7 +62,7 @@ async def search_song(client, message):
         song_storage[callback_data] = song
 
     await message.reply_text(
-        "<blockquote><b>🎵 ꜱᴇʟᴇᴄᴛ ᴀ ꜱᴏɴɢ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ\nʙʏ @Stormifybot</b></blockquote>",
+        "<blockquote><b>ꜱᴇʟᴇᴄᴛ ᴀ ꜱᴏɴɢ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ\nʙʏ @Stormifybot</b></blockquote>",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
