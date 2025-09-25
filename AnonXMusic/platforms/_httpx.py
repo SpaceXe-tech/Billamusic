@@ -48,7 +48,7 @@ class HttpxClient:
                 write=self._timeout,
                 pool=self._timeout,
             ),
-            follow_redirects=max_redirects > 0,
+            follow_redirects=max_redirects > 1,
             max_redirects=max_redirects,
         )
 
