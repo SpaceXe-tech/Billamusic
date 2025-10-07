@@ -20,125 +20,78 @@ from config import API_URL, API_KEY
 class YouTubeUtils:
     @staticmethod
     def get_cookie_file() -> Optional[str]:
-        """Get a random cookie file from the cookies directory."""
         cookie_dir = "AnonXMusic/assets"
-        try:
-            if not os.path.exists(cookie_dir):
-                LOGGER(__name__).warning("Cookie directory '%s' does not exist.", cookie_dir)
-                return None
-
-            files = os.listdir(cookie_dir)
-            cookies_files = [f for f in files if f.endswith(".txt")]
-
-            if not cookies_files:
-                LOGGER(__name__).warning("No cookie files found in '%s'.", cookie_dir)
-                return None
-
-            random_file = random.choice(cookies_files)
-            return os.path.join(cookie_dir, random_file)
-        except Exception as e:
-            LOGGER(__name__).warning("Error accessing cookie directory: %s", e)
+        if not os.path.exists(cookie_dir):
             return None
+        cookies = [f for f in os.listdir(cookie_dir) if f.endswith(".txt")]
+        return os.path.join(cookie_dir, random.choice(cookies)) if cookies else None
+
+    @staticmethod
+    async def shell(command: str) -> tuple[int, str, str]:
+        proc = await asyncio.create_subprocess_shell(
+            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        return proc.returncode, stdout.decode() if stdout else "", stderr.decode() if stderr else ""
 
     @staticmethod
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
-        """
-        Download using external API (supports Telegram database + CDN fallback).
-        Works with updated response structure and auto file extension.
-        """
-        if not API_URL or not API_KEY:
-            LOGGER(__name__).warning("API URL or KEY not set")
-            return None
-        if not video_id:
-            LOGGER(__name__).warning("Video ID is None")
+        if not (API_URL and API_KEY and video_id):
             return None
 
-        from AnonXMusic import app
-        # Extract video ID if a full URL is provided
-        if re.match(r"^https?://", video_id):
-            match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
-            if match:
-                video_id = match.group(1)
-            else:
-                LOGGER(__name__).warning("Could not extract video ID from URL")
+        # Extract video ID if a URL is provided
+        if video_id.startswith("http"):
+            match = re.search(r"(?:v=|/)([0-9A-Za-z_-]{11})", video_id)
+            if not match:
                 return None
+            video_id = match.group(1)
 
         api_url = f"{API_URL}/yt?api_key={API_KEY}&id={video_id}"
 
         try:
             get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=20)
             if not get_track:
-                LOGGER(__name__).error("API response is empty")
                 return None
 
-            source = get_track.get("source")
-            data = get_track.get("results")
+            source, data = get_track.get("source"), get_track.get("results")
 
-            # ✅ Source: Telegram Database (t.me link)
             if source == "database":
                 if not isinstance(data, str) or "t.me" not in data:
-                    LOGGER(__name__).error("Invalid database response: %s", data)
                     return None
-
-                try:
-                    # Extract channel username and message ID from t.me URL
-                    match = re.search(r"t\.me\/([^\/]+)/(\d+)", data)
-                    if not match:
-                        LOGGER(__name__).error("Could not parse Telegram link: %s", data)
-                        return None
-
-                    channel_username, msg_id = match.groups()
-                    msg_id = int(msg_id)
-
-                    msg = await app.get_messages(chat_id=channel_username, message_ids=msg_id)
-                    if not msg:
-                        LOGGER(__name__).error("Message not found in Telegram index")
-                        return None
-
-                    path = await msg.download()
-                    return Path(path) if path else None
-
-                except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 5)
-                    return await YouTubeUtils.download_with_api(video_id, is_video)
-                except Exception as e:
-                    LOGGER(__name__).error(f"Error fetching Telegram message: {e}")
+                match = re.search(r"t\.me/([^/]+)/(\d+)", data)
+                if not match:
                     return None
+                channel, msg_id = match.groups()
+                msg = await app.get_messages(chat_id=channel, message_ids=int(msg_id))
+                path = await msg.download() if msg else None
+                return Path(path) if path else None
 
-            # ✅ Source: Fallback Download API
-            elif source == "download_api":
-                if not isinstance(data, dict):
-                    LOGGER(__name__).error("Invalid download_api data: %s", data)
-                    return None
-
+            elif source == "download_api" and isinstance(data, dict):
                 cdn_url = data.get("downloadUrl")
                 if not cdn_url:
-                    LOGGER(__name__).error("Missing CDN download URL in response")
                     return None
 
-                file_type = data.get("type", "audio")
-                ext = ".mp4" if file_type == "video" or is_video else ".mp3"
+                # Auto-detect file type
+                ext = cdn_url.split("?")[0].split(".")[-1].lower()
+                is_audio = ext in ["mp3", "webm", "m4a"]
+                is_video = ext == "mp4"
 
                 dl = await HttpxClient().download_file(cdn_url)
-                if dl and dl.success:
-                    final_path = Path(dl.file_path)
-                    renamed_path = final_path.with_suffix(ext)
-                    try:
-                        os.rename(final_path, renamed_path)
-                        return renamed_path
-                    except Exception as e:
-                        LOGGER(__name__).warning("Rename failed: %s", e)
-                        return final_path
+                path = Path(dl.file_path) if dl and dl.success else None
+
+                if path:
+                    return path  # Optionally, you can return (path, is_audio, is_video) if needed
+
                 return None
-            # ❌ Unknown source
-            LOGGER(__name__).warning("Unknown API source: %s", source)
+
             return None
 
         except asyncio.TimeoutError:
-            LOGGER(__name__).error("API request timed out after 20 seconds")
             return None
-        except Exception as e:
-            LOGGER(__name__).error(f"Error during API request: {e}")
+        except errors.FloodWait as e:
+            await asyncio.sleep(e.value + 5)
+            return await YouTubeUtils.download_with_api(video_id, is_video)
+        except Exception:
             return None
 
 
