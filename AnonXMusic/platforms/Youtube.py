@@ -43,8 +43,8 @@ class YouTubeUtils:
     @staticmethod
     async def download_with_api(video_id: str, is_video: bool = False) -> Optional[Path]:
         """
-        Download using the external API (supports Telegram index + CDN fallback).
-        Accepts either full YouTube URL or raw video ID, managing response like the old class.
+        Download using external API (supports Telegram database + CDN fallback).
+        Works with updated response structure and auto file extension.
         """
         if not API_URL or not API_KEY:
             LOGGER(__name__).warning("API URL or KEY not set")
@@ -54,7 +54,7 @@ class YouTubeUtils:
             return None
 
         from AnonXMusic import app
-        # Extracting video ID if a full YouTube URL is provided
+        # Extract video ID if a full URL is provided
         if re.match(r"^https?://", video_id):
             match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", video_id)
             if match:
@@ -63,75 +63,84 @@ class YouTubeUtils:
                 LOGGER(__name__).warning("Could not extract video ID from URL")
                 return None
 
-        video_id = video_id.strip()
         api_url = f"{API_URL}/yt?api_key={API_KEY}&id={video_id}"
 
         try:
-            # Wait up to 30 seconds for API response
             get_track = await asyncio.wait_for(HttpxClient().make_request(api_url), timeout=20)
             if not get_track:
                 LOGGER(__name__).error("API response is empty")
                 return None
 
-            # Handle response in a single pass, mimicking old class's direct processing
             source = get_track.get("source")
-            data = get_track.get("data", {})
+            data = get_track.get("results")
 
-            if source == "telegram_index":
-                telegram_url = data.get("telegram_url")
-                msg_id = data.get("message_id")
-                channel_id = data.get("channel")
-
-                if not telegram_url or not msg_id or not channel_id:
-                    LOGGER(__name__).error("Missing telegram index fields in API response")
+            # ✅ Source: Telegram Database (t.me link)
+            if source == "database":
+                if not isinstance(data, str) or "t.me" not in data:
+                    LOGGER(__name__).error("Invalid database response: %s", data)
                     return None
 
                 try:
-                    msg = await app.get_messages(chat_id=channel_id, message_ids=msg_id)
+                    # Extract channel username and message ID from t.me URL
+                    match = re.search(r"t\.me\/([^\/]+)/(\d+)", data)
+                    if not match:
+                        LOGGER(__name__).error("Could not parse Telegram link: %s", data)
+                        return None
+
+                    channel_username, msg_id = match.groups()
+                    msg_id = int(msg_id)
+
+                    msg = await app.get_messages(chat_id=channel_username, message_ids=msg_id)
                     if not msg:
                         LOGGER(__name__).error("Message not found in Telegram index")
                         return None
+
                     path = await msg.download()
                     return Path(path) if path else None
+
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 0)
+                    await asyncio.sleep(e.value + 2)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
-                    LOGGER(__name__).error(f"Error fetching Telegram index message: {e}")
+                    LOGGER(__name__).error(f"Error fetching Telegram message: {e}")
                     return None
 
+            # ✅ Source: Fallback Download API
             elif source == "download_api":
-                cdn_url = data.get("url")
-                if not cdn_url:
-                    LOGGER(__name__).error("CDN URL missing in download_api response")
+                if not isinstance(data, dict):
+                    LOGGER(__name__).error("Invalid download_api data: %s", data)
                     return None
+
+                cdn_url = data.get("downloadUrl")
+                if not cdn_url:
+                    LOGGER(__name__).error("Missing CDN download URL in response")
+                    return None
+
+                file_type = data.get("type", "audio")
+                ext = ".mp4" if file_type == "video" or is_video else ".mp3"
 
                 dl = await HttpxClient().download_file(cdn_url)
-                return dl.file_path if dl and dl.success else None
-
+                if dl and dl.success:
+                    final_path = Path(dl.file_path)
+                    renamed_path = final_path.with_suffix(ext)
+                    try:
+                        os.rename(final_path, renamed_path)
+                        return renamed_path
+                    except Exception as e:
+                        LOGGER(__name__).warning("Rename failed: %s", e)
+                        return final_path
+                return None
+            # ❌ Unknown source
             LOGGER(__name__).warning("Unknown API source: %s", source)
             return None
 
         except asyncio.TimeoutError:
-            LOGGER(__name__).error("API request timed out after 30 seconds")
+            LOGGER(__name__).error("API request timed out after 20 seconds")
             return None
         except Exception as e:
             LOGGER(__name__).error(f"Error during API request: {e}")
             return None
 
-async def shell_cmd(cmd):
-    proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, errorz = await proc.communicate()
-    if errorz:
-        if "unavailable videos are hidden" in (errorz.decode("utf-8")).lower():
-            return out.decode("utf-8")
-        else:
-            return errorz.decode("utf-8")
-    return out.decode("utf-8")
 
 class YouTubeAPI:
     def __init__(self):
