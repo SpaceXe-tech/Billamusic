@@ -99,7 +99,7 @@ class YouTubeUtils:
                     return Path(path) if path else None
 
                 except errors.FloodWait as e:
-                    await asyncio.sleep(e.value + 2)
+                    await asyncio.sleep(e.value + 5)
                     return await YouTubeUtils.download_with_api(video_id, is_video)
                 except Exception as e:
                     LOGGER(__name__).error(f"Error fetching Telegram message: {e}")
