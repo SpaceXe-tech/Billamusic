@@ -60,9 +60,7 @@ class HttpxClient:
 
     @staticmethod
     def _append_api_key(url: str) -> str:
-        """
-        Append api_key as query param if the URL matches API_URL.
-        """
+        """Append api_key as query param if the URL matches API_URL."""
         if API_URL and url.startswith(API_URL):
             parsed = urlparse(url)
             query = parse_qs(parsed.query)
@@ -88,6 +86,9 @@ class HttpxClient:
         overwrite: bool = False,
         **kwargs: Any,
     ) -> DownloadResult:
+        """
+        Download a file asynchronously using httpx, saving to DOWNLOADS_DIR by default.
+        """
         if not url:
             return DownloadResult(success=False, error="Empty URL provided")
 
@@ -98,28 +99,32 @@ class HttpxClient:
                 "GET", url, timeout=self._download_timeout, headers=headers
             ) as response:
                 response.raise_for_status()
+
                 if file_path is None:
                     cd = response.headers.get("Content-Disposition", "")
                     match = re.search(r'filename="?([^"]+)"?', cd)
                     filename = (
                         unquote(match[1])
                         if match
-                        else (Path(url).name or uuid.uuid4().hex)
+                        else Path(urlparse(url).path).name or f"{uuid.uuid4().hex}.bin"
                     )
                     path = Path(DOWNLOADS_DIR) / filename
                 else:
                     path = Path(file_path) if isinstance(file_path, str) else file_path
 
                 if path.exists() and not overwrite:
+                    LOGGER(__name__).debug("File already exists: %s", path)
                     return DownloadResult(success=True, file_path=path)
 
                 path.parent.mkdir(parents=True, exist_ok=True)
+
                 async with aiofiles.open(path, "wb") as f:
                     async for chunk in response.aiter_bytes(self.CHUNK_SIZE):
                         await f.write(chunk)
 
                 LOGGER(__name__).debug("Successfully downloaded file to %s", path)
                 return DownloadResult(success=True, file_path=path)
+
         except Exception as e:
             error_msg = self._handle_http_error(e, url)
             LOGGER(__name__).error(error_msg)
@@ -132,66 +137,68 @@ class HttpxClient:
         backoff_factor: float = BACKOFF_FACTOR,
         **kwargs: Any,
     ) -> Optional[dict[str, Any]]:
+        """
+        Perform a GET request and normalize the API response for yt-dl endpoints.
+        Always returns a dict with keys: 'source' and 'results' if possible.
+        """
         if not url:
             LOGGER(__name__).warning("Empty URL provided")
             return None
 
         url = self._append_api_key(url)
         headers = kwargs.pop("headers", {})
+
         for attempt in range(max_retries):
             try:
                 start = time.monotonic()
                 response = await self._session.get(url, headers=headers, **kwargs)
                 response.raise_for_status()
                 duration = time.monotonic() - start
-                LOGGER(__name__).debug(
-                    "Request to %s succeeded in %.2fs", url, duration
-                )
-                return response.json()
+                LOGGER(__name__).debug("Request to %s succeeded in %.2fs", url, duration)
+
+                # Try JSON decode
+                try:
+                    data = response.json()
+                except Exception:
+                    raw_text = (await response.aread()).decode(errors="ignore")
+                    LOGGER(__name__).warning("Non-JSON API response from %s: %s", url, raw_text[:200])
+                    return {"source": "unknown", "results": raw_text}
+
+                if isinstance(data, dict):
+                    source = data.get("source") or "unknown"
+                    results = data.get("results") or data.get("data") or None
+                    return {"source": source, "results": results}
+                else:
+                    # Handle non-dict responses safely
+                    LOGGER(__name__).warning("Unexpected API response type: %s", type(data))
+                    return {"source": "unknown", "results": data}
 
             except httpx.HTTPStatusError as e:
                 try:
-                    error_response = e.response.json()
-                    if isinstance(error_response, dict) and "error" in error_response:
-                        error_msg = f"API Error {e.response.status_code} for {url}: {error_response['error']}"
-                    else:
-                        error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
-                except ValueError:
-                    error_msg = f"HTTP error {e.response.status_code} for {url}. Body: {e.response.text}"
-
-                LOGGER(__name__).warning(error_msg)
+                    body = e.response.text
+                    LOGGER(__name__).warning(
+                        "HTTP %d for %s: %s", e.response.status_code, url, body[:200]
+                    )
+                except Exception:
+                    pass
                 if attempt == max_retries - 1:
-                    LOGGER(__name__).error(error_msg)
-                    return None
-
-            except httpx.TooManyRedirects as e:
-                error_msg = f"Redirect loop for {url}: {repr(e)}"
-                LOGGER.warning(error_msg)
-                if attempt == max_retries - 1:
-                    LOGGER(__name__).error(error_msg)
-                    return None
+                    return {"source": "error", "results": {"error": str(e)}}
 
             except httpx.RequestError as e:
-                error_msg = f"Request failed for {url}: {repr(e)}"
-                LOGGER(__name__).warning(error_msg)
+                LOGGER(__name__).warning("Request failed for %s: %s", url, repr(e))
                 if attempt == max_retries - 1:
-                    LOGGER(__name__).error(error_msg)
-                    return None
-
-            except ValueError as e:
-                error_msg = f"Invalid JSON response from {url}: {repr(e)}"
-                LOGGER(__name__).error(error_msg)
-                return None
+                    return {"source": "error", "results": {"error": repr(e)}}
 
             except Exception as e:
-                error_msg = f"Unexpected error for {url}: {repr(e)}"
-                LOGGER(__name__).error(error_msg)
-                return None
+                LOGGER(__name__).error("Unexpected error during request to %s: %s", url, repr(e))
+                if attempt == max_retries - 1:
+                    return {"source": "error", "results": {"error": str(e)}}
 
+            # Retry with exponential backoff
             await asyncio.sleep(backoff_factor * (2**attempt))
 
         LOGGER(__name__).error("All retries failed for URL: %s", url)
-        return None
+        return {"source": "error", "results": {"error": "Max retries exceeded"}}
 
     @staticmethod
     def _handle_http_error(e: Exception, url: str) -> str:
